@@ -37,6 +37,10 @@ MVP Miro фокусируется на главных-функциях: беск
 Возраст: 25–34 года (основная группа), 52% женщины. [2](https://www.similarweb.com/website/miro.com/)
 Профессии: менеджеры продуктов, дизайнеры, разработчики.. [5](https://www.northbeam.io/blog/what-is-mau-tracking-monthly-active-users-to-gauge-growth)
 
+## Распределение по возрасту
+<img width="712" height="386" alt="изображение" src="https://github.com/user-attachments/assets/ba71755e-edee-4a37-b77d-54552ece445c" />
+
+
 ## География аудитории
 
 | Страна          | Доля трафика (%) |
@@ -46,6 +50,9 @@ MVP Miro фокусируется на главных-функциях: беск
 | Бразилия       | 6.1             |
 | Германия       | 6.0             |
 | Великобритания | 5.5             | [3](https://canvasbusinessmodel.com/blogs/target-market/miro-target-market)
+
+<img width="1078" height="505" alt="изображение" src="https://github.com/user-attachments/assets/42c306bc-ee2a-461d-88c5-6104fc4b26a2" />
+
 
 ## Расчёт нагрузки (оценка для MVP)
 **Базовые метрики:** MAU 15 млн, DAU 1.5–3 млн (10–20% ratio), сессия 30 мин. [6](https://www.northbeam.io/blog/what-is-mau-tracking-monthly-active-users-to-gauge-growth) <br>
