@@ -29,11 +29,12 @@ Miro — это онлайн-платформа для визуального с
 Возраст: 25–34 года (основная группа), 52% женщины. <br>
 Профессии: менеджеры продуктов, дизайнеры, разработчики.. [[similarweb.com]](https://www.similarweb.com/website/miro.com/)<br>
 
-## Распределение по возрасту
+## Распределение по возрасту <br>
 <img width="712" height="386" alt="изображение" src="https://github.com/user-attachments/assets/ba71755e-edee-4a37-b77d-54552ece445c" />
 
 <br>
-## География аудитории
+
+## География аудитории<br>
 
 | Страна          | Доля трафика (%) |
 |-----------------|------------------|
@@ -43,6 +44,7 @@ Miro — это онлайн-платформа для визуального с
 | Германия       | 6.0             |
 | Великобритания | 5.5             | [[similarweb.com]](https://www.similarweb.com/website/miro.com/)<br>
 
+<br>
 <img width="1078" height="505" alt="изображение" src="https://github.com/user-attachments/assets/42c306bc-ee2a-461d-88c5-6104fc4b26a2" />
 <br>
 
