@@ -21,6 +21,7 @@ Miro — это онлайн-платформа для визуального с
 | DAU/MAU         | 10-15% |
 | Демография      | 25-34 года, 52% женщины |
 | Платящие клиенты | 130k |
+
 [[fueler.io]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) 
 [[similarweb.com]](https://www.similarweb.com/website/miro.com/)
 
