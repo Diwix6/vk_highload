@@ -63,8 +63,40 @@ Miro — это онлайн-платформа для визуального с
 
 | Метрика          | Средний                | Пиковый (×2) | Примечание                                 |
 | ---------------- | ---------------------- | ------------ | ------------------------------------------ |
+| MAU             | 90M | - | - |
+| DAU             | 13.5M | - | - |
+| DAU/MAU         | 15% | - | - |
 | Concurrent users | 90k | 180k   | <300/доска × тысячи досок |
 | RPS API          | 10-20k  | 40k          | 5-10 ops/sec/1000 users   |
 | WS msg/sec       | 20-50k  | 100k         | -     |
 | P99 latency      | 100-200мс | -            |  - |
 | Трафик пик       | 10-20 Гбит/сек           | -            | - |
+
+
+| Метрика | Значение | Источник |
+|---|---|---|
+| **Monthly Active Users (MAU)** | 90 млн | Официальное заявление Miro на Canvas 25 (2025): "100 million users"  [[diginomica]](https://diginomica.com/canvas-25-miro-notches-100-million-users-it-launches-ai-collaboration-tools) |
+| **Daily Active Users (DAU)** | 13.5 млн | **Допущение** ( ≈15% от MAU ) |
+| **Среднее количество сессий/досок в день** | ≈1.0/день | **Допущение** на основе типичного использования (1 сессия/день для DAU)  [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
+| **Среднее количество созданных досок** | 0.1/день | **Оценка** (учитывая по бесплатному плану - 3 доски) [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics)) |
+| **Среднее количество коллаборативных действий** | ≈5/сессию | **Оценка** ( [[fueler]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/)) |
+| **Время сессии (средняя длительность)** | 45 минут | Fueler: "session average durations around 45 minutes"  [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
+| **Количество досок на пользователя** | ≈2-5 активных | **Оценка** (по бесплатному плану 3; макс 5 тыс. objects  [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/)) |
+| **Размер одной доски** | 1-200 МБ | Miro Help: backup up to 200 MB  [[community.miro]](https://community.miro.com/ask-the-community-45/finding-out-miro-board-file-size-4834) |
+| **Средний размер доски** | 10-50 МБ | **Оценка** ([[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/)) |
+| **Размер ответа доски (load)** | 500 КБ - 5 МБ | **Оценка** |
+| **Интервал авто-сейва** | 1-5 сек | **Допущение** |
+| **Число обновлений за сессию** | 540 | 45 мин / 5 сек |
+
+## 2.2 Технические метрики
+
+### Расчёт объёма хранения
+Расчёт производится для хранения данных, генерируемых за **1 год** использования сервиса.
+
+| Тип данных | Формула расчёта для 1 пользователя | Общий объём данных |
+| :--- | :--- | :--- |
+| **Доски (boards)** | 0.1 доска × 365 д. × 30 МБ ≈ 1.1 ГБ | **≈110 ПБ** |
+| **Коллаборативные действия** | 5 действий × 365 × 1 КБ ≈ 1.8 МБ | **≈180 ТБ** |
+| **Сессии/логи** | 1 сессия × 365 × 10 КБ ≈ 3.65 МБ | **≈365 ТБ** |
+| **Шаблоны/экспорты** | 0.3 × 365 × 5 КБ ≈ 0.55 МБ | **≈55 ТБ** |
+| **Итого** | **≈1.1 ГБ на пользователя** | **≈110 ПБ**  [[miro]](https://miro.com/product-development/product-metrics/)
