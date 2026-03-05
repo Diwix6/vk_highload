@@ -5,7 +5,6 @@ Miro — это онлайн-платформа для визуального с
  [[similarweb.com]](https://www.similarweb.com/website/miro.com/)
 
 ## Функциональные требования
-- Создание/редактирование досок с drag-and-drop (фигуры, заметки, линии). <br>
 - Синхронизация в реальном времени до 50 пользователей на доску, чат, курсоры. <br>
 - Интеграции: экспорт в PNG/PDF, импорт из Figma/Jira (базовый уровень). <br>
 - Пользователи: регистрация, приглашения, роли (viewer/editor). [[updf]](https://updf.com/knowledge/miro-business-breakdown/) <br>
