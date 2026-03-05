@@ -65,11 +65,11 @@ Miro — это онлайн-платформа для визуального с
 | **Daily Active Users (DAU)** | 13.5 млн | **Допущение** ( ≈15% от MAU ) |
 | **Среднее количество сессий/досок в день** | ≈1.0/день | **Допущение** на основе типичного использования (1 сессия/день для DAU)  [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
 | **Среднее количество созданных досок** | 0.1/день | **Оценка** (учитывая по бесплатному плану - 3 доски) [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics)) |
-| **Среднее количество коллаборативных действий** | ≈5/сессию | **Оценка** ( [[fueler]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/)) |
+| **Среднее количество коллаборативных действий** | ≈5/сессию | **Оценка**  [[fueler]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/) |
 | **Время сессии (средняя длительность)** | 45 минут | Fueler: "session average durations around 45 minutes"  [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
-| **Количество досок на пользователя** | ≈2-5 активных | **Оценка** (по бесплатному плану 3; макс 5 тыс. objects  [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/)) |
+| **Количество досок на пользователя** | ≈2-5 активных | **Оценка** по бесплатному плану 3; макс 5 тыс. objects  [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/) |
 | **Размер одной доски** | 1-200 МБ | Miro Help: backup up to 200 MB  [[community.miro]](https://community.miro.com/ask-the-community-45/finding-out-miro-board-file-size-4834) |
-| **Средний размер доски** | 10-50 МБ | **Оценка** ([[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/)) |
+| **Средний размер доски** | 10-50 МБ | **Оценка** [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/) |
 | **Размер ответа доски (load)** | 500 КБ - 5 МБ | **Оценка** |
 | **Интервал авто-сейва** | 1-5 сек | **Допущение** |
 | **Число обновлений за сессию** | 540 | 45 мин / 5 сек |
@@ -86,3 +86,12 @@ Miro — это онлайн-платформа для визуального с
 | **Сессии/логи** | 1 сессия × 365 × 10 КБ ≈ 3.65 МБ | **≈365 ТБ** |
 | **Шаблоны/экспорты** | 0.3 × 365 × 5 КБ ≈ 0.55 МБ | **≈55 ТБ** |
 | **Итого** | **≈1.1 ГБ на пользователя** | **≈110 ПБ**  [[miro]](https://miro.com/product-development/product-metrics/)
+
+Расчет RPS
+
+| Метрика                                  | Формула                                                        | Значение                                   |
+| ---------------------------------------- | -------------------------------------------------------------- | ------------------------------------------ |
+| Общее actions/сутки                      | 25 млн DAU × 1 сессия × 5 действий + 25 млн × (45×60/5) обновлений | ≈ 1 млрд запросов/сутки                    |
+| Средний RPS                              | 1 млрд / 86 400 сек                                            | ≈ 11 500 RPS                               |
+| Пик RPS (10% пользователей одновременно) | 11 500 × 10                                                    | ≈ 115 000 RPS                              |
+| WebSocket persistent                     | 25 млн DAU × 1/10 актив.                                       | ≈ 2.5 млн соединений |
