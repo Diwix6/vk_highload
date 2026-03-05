@@ -67,7 +67,7 @@ Miro — это онлайн-платформа для визуального с
 | **Среднее количество созданных досок** | 0.1/день | **Оценка** (учитывая по бесплатному плану - 3 доски) [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics)) |
 | **Среднее количество коллаборативных действий** | ≈5/сессию | **Оценка**  [[fueler]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/) |
 | **Время сессии (средняя длительность)** | 45 минут | Fueler: "session average durations around 45 minutes"  [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
-| **Количество досок на пользователя** | ≈2-5 активных | **Оценка** по бесплатному плану 3; макс 5 тыс. objects  [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/) |
+| **Количество досок на пользователя** | ≈2-5 активных | **Оценка** по бесплатному плану 3; макс 5 тыс. объект  [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/) |
 | **Размер одной доски** | 1-200 МБ | Miro Help: backup up to 200 MB  [[community.miro]](https://community.miro.com/ask-the-community-45/finding-out-miro-board-file-size-4834) |
 | **Средний размер доски** | 10-50 МБ | **Оценка** [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/) |
 | **Размер ответа доски (load)** | 500 КБ - 5 МБ | **Оценка** |
