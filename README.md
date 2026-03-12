@@ -8,7 +8,7 @@
  [[similarweb.com]](https://www.similarweb.com/website/miro.com/)
 ### 1.2 Целевая аудитория
 - Количество пользователей в месяц (MAU): 60М за 4 квартал 2025 года [[swotanalysis]](https://www.swotanalysis.com/miro)
-- Количество пользователей в день (DAU): 9М (15% от MAU)
+- Количество пользователей в день (DAU): 6М (10% от MAU)
 - Платящие клиенты: 250 тыс. [[swotanalysis]](https://www.swotanalysis.com/miro)
 - Возраст: 25–34 года (основная группа), 52% женщины. <br>
 - Профессии: менеджеры продуктов, дизайнеры, разработчики. [[similarweb.com]](https://www.similarweb.com/website/miro.com/)<br>
@@ -53,8 +53,8 @@
 ## 2. Расчёт нагрузки
 
 ### 2.1 Профиль нагрузки
-- **Пользователи:** DAU 9M, одновременно 200k . <br>
-- **Сессия:** ~11 минут. 
+- **Пользователи:** DAU 6M, одновременно 200k . <br>
+- **Сессия:** ~45 минут. 
 - **Операций за сессию:** отсутствует (создание объекта, перемещение, удаление, синхронизация...). <br>
 [[semrush]](https://www.semrush.com/website/miro.com/overview/)
 [[fueler.io]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics)
