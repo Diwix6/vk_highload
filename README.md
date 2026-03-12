@@ -196,7 +196,7 @@ Miro хостит всю инфраструктуру на **AWS** [[Wallarm Cas
 <img width="638" height="805" alt="изображение" src="https://github.com/user-attachments/assets/c2ae157f-cada-4ed5-9aa9-57404e76a714" />
 
 
-Miro — latency-sensitive (чувстительное к задержке) приложение: задержка синхронизации курсоров и изменений на доске критична для UX. Целевой порог: **< 100 мс** для WebSocket-событий [[System Design Handbook](https://www.systemdesignhandbook.com/guides/miro-system-design-interview/)]
+Miro — latency-sensitive (чувстительное к задержке) приложение: задержка синхронизации курсоров и изменений на доске критична для UX. Целевой порог: **< 100 мс** для WebSocket-событий 
 Для снижения задержки при передаче реального времени дополнительно используется **WebRTC** (P2P для курсоров) и **gRPC** для внутренних микросервисных вызовов [[Wallarm Case Study](https://www.wallarm.com/resources/miro-case-study)].
 
 ## 4. Локальная балансировка нагрузки
@@ -254,8 +254,7 @@ Miro использует CRDT для разрешения конфликтов 
 5. Fueler.io — Miro Usage & Growth Statistics 2026. https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics
 6. Wallarm Case Study — Miro infrastructure (AWS, WebSocket, billions requests/month). https://www.wallarm.com/resources/miro-case-study
 7. AWS Marketplace — Miro listing (Fortune 500, 100M users). https://aws.amazon.com/marketplace/pp/prodview-wky5ywoz3bxay
-8. System Design Handbook — Miro System Design Interview Guide (WebSocket, CRDT, CDN, Redis). https://www.systemdesignhandbook.com/guides/miro-system-design-interview/ 
-9. Oreate AI — Excalidraw vs Miro (CRDT analysis). https://www.oreateai.com/blog/excalidraw-vs-miro-choosing-your-digital-whiteboard-canvas/
-10. MassiveGRID — Nextcloud Whiteboard vs Miro (AWS infrastructure, data residency). https://massivegrid.com/blog/nextcloud-whiteboard-vs-miro/
-11. AWS Partner Blog — Using Miro to enable collaborative DevOps on AWS. https://aws.amazon.com/blogs/apn/using-miro-to-enable-collaborative-devops-on-aws/
-12. Tech Startups — Miro layoffs & revenue data. https://techstartups.com/2024/11/04/miro-a-unicorn-startup-once-valued-at-17-5-billion-cuts-18-of-its-workforce-amid-competitive-pressures/
+8. Oreate AI — Excalidraw vs Miro (CRDT analysis). https://www.oreateai.com/blog/excalidraw-vs-miro-choosing-your-digital-whiteboard-canvas/
+9. MassiveGRID — Nextcloud Whiteboard vs Miro (AWS infrastructure, data residency). https://massivegrid.com/blog/nextcloud-whiteboard-vs-miro/
+10. AWS Partner Blog — Using Miro to enable collaborative DevOps on AWS. https://aws.amazon.com/blogs/apn/using-miro-to-enable-collaborative-devops-on-aws/
+11. Tech Startups — Miro layoffs & revenue data. https://techstartups.com/2024/11/04/miro-a-unicorn-startup-once-valued-at-17-5-billion-cuts-18-of-its-workforce-amid-competitive-pressures/
