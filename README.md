@@ -59,19 +59,54 @@
 [[semrush]](https://www.semrush.com/website/miro.com/overview/)
 [[fueler.io]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics)
 
-## 2.2 Метрики производительности
+## 2.2 Продуктовые метрики
 
 | Метрика | Значение | Источник |
 |---|---|---|
+| **Зарегистрированных пользователей** | 100 млн | [[Miro Community]](https://community.miro.com/general-news-2/100-million-users-and-counting-26253) |
 | **Monthly Active Users (MAU)** | 60 млн | |
-| **Daily Active Users (DAU)** | 9 млн | **Допущение** ( ≈15% от MAU ) |
+| **Daily Active Users (DAU)** | 3-6 млн | **Допущение** ( ≈5-10% от MAU ) |
 | **Среднее количество сессий/досок в день** | ≈2.56/день | **Допущение**  [[semrush]](https://www.semrush.com/website/miro.com/overview/) |
-| **Время сессии (средняя длительность)** | 11 минут | Fueler: "session average durations around 45 minutes"  [[fueler]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
-| **Размер одной доски** | 1-200 МБ | Miro Help: backup up to 200 MB  [[community.miro]](https://community.miro.com/ask-the-community-45/finding-out-miro-board-file-size-4834) |
-| **Средний размер доски** | 10-50 МБ (средне 30 МБ) | **Оценка** [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/) |
-| **Размер ответа доски (load)** | 10 МБ - 50 МБ | **Оценка** |
-| **Интервал авто-сейва** | 1-5 сек | **Допущение** |
-| **Число обновлений за сессию** | 120 | 10 мин / 5 сек |
+| **Коллаборативных действий в месяц** | 1 млрд+ | [[UPDF Analysis, 2025]](https://updf.com/knowledge/miro-business-breakdown/) |
+| **Средняя длительность сессии** | ~45 мин | [[Fueler.io]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
+| **Среднегодовой рост пользовательской базы** | ~18% | [[Fueler.io]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
+| **ARR (Annual Recurring Revenue)** | ~$560 млн (2023) | [[GetLatka]](https://getlatka.com/companies/miro) |
+
+#### Среднее количество действий пользователя в день
+ 
+Для Miro как инструмента совместной работы на виртуальной доске ключевыми действиями являются:
+ 
+| Тип действия | Среднее количество в день на пользователя | Комментарий |
+|---|---|---|
+| Открытие доски | 3 | Рабочие сессии в течение дня |
+| Операции на доске (drag, resize, create, edit) | ~200 | Активная рабочая сессия ~45 мин, ≈4–5 действий/мин |
+| Загрузка медиафайлов (изображения, PDF) | 2 | Вставка контента на доску |
+| Комментарии / sticky notes | 10 | Совместная работа |
+| Приглашения / sharing | 1 | Публикация ссылки на доску |
+| Экспорт доски (PNG, PDF) | 0,5 | Финализация артефакта |
+
+#### Хранилище данных (оценка на 5 лет)
+ 
+**Исходные данные:**
+- 100 млн зарегистрированных пользователей, MAU ~60 млн
+- Рост 18%/год → через 5 лет ≈ 600 млн зарегистрированных
+- Средний размер 1 доски (векторные объекты + метаданные): ~2 МБ
+- Среднее количество досок на активного пользователя: 15
+- Средний размер загруженного медиафайла: 1,5 МБ
+- Активный пользователь добавляет ~2 медиафайла/день
+
+ Тип данных | Расчёт | Объём |
+|---|---|---|
+| Данные досок (векторный контент, метаданные) | 227 млн × 15 досок × 2 МБ | ~6,8 ПБ |
+| Медиафайлы пользователей (изображения, PDF) | 100 млн активных × 2 файла × 365 дней × 5 лет × 1,5 МБ | ~547 ПБ |
+| Профили пользователей | 227 млн × 100 КБ | ~23 ТБ |
+| История изменений / undo-log | 27,5 млн DAU × 200 ops × 5 лет × 365 дней × 0,5 КБ | ~10 ПБ |
+| Сессии (Redis, in-memory) | 3 млн DAU × 1 КБ | ~3 ГБ |
+| **Итого** | | **~565 ПБ** |
+[[community.miro]](https://community.miro.com/ask-the-community-45/finding-out-miro-board-file-size-4834) 
+[[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/)
+
+Примечание: медиафайлы хранятся в S3-совместимых хранилищах (AWS S3). Реальные данные Miro не раскрывает публично.
 
 ## 2.2 Технические метрики
 
@@ -86,6 +121,24 @@
 - Для среднего количества колаборационных действия на 1 сессию, возьмем 5.
 
 
+**Базовые параметры:**
+- DAU = 4 млн (медиана между 3 и 5 млн)
+- Пиковый час = 8× от среднесуточного значения (из опыта SaaS, пик — дневное рабочее время)
+- Коэффициент пика = 1,5× от среднего часового RPS
+ 
+**Формула перевода:** `RPS = (DAU × действий_в_день) / 86 400`
+ 
+| Тип запроса | Действий / DAU / день | Средний RPS | Пиковый RPS |
+|---|---|---|---|
+| Загрузка / открытие доски (board load) | 3 | 139 | ~1 700 |
+| Операции синхронизации (WS-события) | 200 | 9 259 | ~111 100 |
+| REST API (метаданные, пользователи) | 20 | 926 | ~11 100 |
+| Загрузка медиафайлов | 2 | 93 | ~1 100 |
+| Экспорт доски | 0,5 | 23 | ~280 |
+| **Итого (все типы)** | 225,5 | **10 440** | **~125 280** |
+
+Примечание: данные о масштабе подтверждаются Wallarm: Miro требовал инфраструктуру, способную «самомасштабируемость для поддержки **миллиардов запросов в месяц**» [[Wallarm Case Study](https://www.wallarm.com/resources/miro-case-study)]. 1 млрд запросов/месяц ≈ 386 RPS среднее.
+
 | Тип данных | Формула расчёта для 1 пользователя | Общий объём данных |
 | :--- | :--- | :--- |
 | **Доски (boards)** | (0.1 -- 1) доски × 365 д. × 30 МБ ≈ (1.7 -- 17) ГБ | **≈(110 -- 1110) ПБ** |
@@ -94,11 +147,86 @@
 | **Шаблоны/экспорты** | 0.3 × 365 × 5 КБ ≈ 0.55 МБ | **≈55 ТБ** |
 | **Итого** | **≈1.1 ГБ на пользователя** | **≈110 ПБ**  [[miro]](https://miro.com/product-development/product-metrics/)
 
-Расчет RPS
+#### Сетевой трафик
+ 
+| Тип трафика | Средний объём запроса | Средний трафик | Пиковый трафик |
+|---|---|---|---|
+| Board load (HTML/JSON) | 150 КБ | ~20 МБ/с | ~255 МБ/с |
+| WS sync (delta updates) | 0,5 КБ | ~4,4 МБ/с | ~53 МБ/с |
+| Media upload | 1,5 МБ | ~140 МБ/с | ~1,65 ГБ/с |
+| Media download (CDN) | 1,5 МБ | ~140 МБ/с | ~1,65 ГБ/с |
+| REST API | 5 КБ | ~4,5 МБ/с | ~54 МБ/с |
+| **Итого (исходящий + входящий)** | | **~310 МБ/с** | **~3,7 ГБ/с** |
 
-| Метрика                                  | Формула                                                        | Значение                                   |
-| ---------------------------------------- | -------------------------------------------------------------- | ------------------------------------------ |
-| Общее actions/сутки                      | 25 млн DAU × 1 сессия × 5 действий + 25 млн × (45×60/5) обновлений | ≈ 1 млрд запросов/сутки                    |
-| Средний RPS                              | 1 млрд / 86 400 сек                                            | ≈ 11 500 RPS                               |
-| Пик RPS (10% пользователей одновременно) | 11 500 × 10                                                    | ≈ 115 000 RPS                              |
-| WebSocket persistent                     | 25 млн DAU × 1/10 актив.                                       | ≈ 2.5 млн соединений |
+> Статические ресурсы (JS/CSS/изображения) раздаются через CDN и не нагружают backend напрямую. Реальный пиковый трафик на серверах ниже.
+
+## 3. Глобальная балансировка нагрузки
+ 
+### 3.1 Географическое распределение трафика
+ 
+Miro используется в 180+ странах [[UPDF, 2025](https://updf.com/knowledge/miro-business-breakdown/)]. Основная аудитория концентрируется в Северной Америке и Западной Европе, значительная доля — в Азиатско-Тихоокеанском регионе.
+
+<br>
+<img width="1078" height="505" alt="изображение" src="https://github.com/user-attachments/assets/42c306bc-ee2a-461d-88c5-6104fc4b26a2" />
+<br>
+ 
+Ориентировочное распределение трафика по регионам:
+ 
+| Регион | Доля трафика | Пиковый RPS (от 125 280) |
+|---|---|---|
+| Северная Америка (США, Канада) | 35% | ~43 850 |
+| Европа (Западная) | 30% | ~37 580 |
+| Азиатско-Тихоокеанский | 20% | ~25 060 |
+| Остальной мир | 15% | ~18 790 |
+ 
+### 3.2 Размещение дата-центров
+ 
+Miro хостит всю инфраструктуру на **AWS** [[Wallarm Case Study](https://www.wallarm.com/resources/miro-case-study)]. Для обеспечения низкой задержки и соответствия требованиям предполагаются следующие регионы:
+ 
+| Регион | AWS Region | Обоснование |
+|---|---|---|
+| США (основной) | `us-east-1` (Virginia) | Штаб-квартира в Сан-Франциско, максимальная аудитория |
+| Европа | `eu-west-1` (Ирландия) или `eu-central-1` (Франкфурт) | Евразия |
+| Азия | `ap-southeast-1` (Сингапур) | Покрытие Азиатско-Тихоокеанского региона |
+ 
+ [[Nextcloud Whiteboard vs Miro](https://massivegrid.com/blog/nextcloud-whiteboard-vs-miro/)].
+ 
+### 3.3 Механизм глобальной балансировки
+ 
+**Технология: GeoDNS + Anycast**
+ 
+```
+Пользователь
+    │
+    ▼
+DNS-резолвер (Amazon Route)
+    │ → определяет ближайший регион по IP геолокации и latency
+    ▼
+Ближайший CDN (CloudFront / Fastly)
+    │
+    ├── Статический контент (JS, CSS, шаблоны) → CDN-кэш (hit)
+    └── Динамические запросы → Региональный балансировщик нагрузки → Backend
+```
+
+Miro — latency-sensitive приложение: задержка синхронизации курсоров и изменений на доске критична для UX. Целевой порог: **< 100 мс** для WebSocket-событий [[System Design Handbook](https://www.systemdesignhandbook.com/guides/miro-system-design-interview/)]
+Для снижения задержки при передаче реального времени дополнительно используется **WebRTC** (P2P для курсоров и voice) и **gRPC** для внутренних микросервисных вызовов [[Wallarm Case Study](https://www.wallarm.com/resources/miro-case-study)].
+
+## 4. Локальная балансировка нагрузки
+ 
+### 4.1 Общая схема внутренней архитектуры
+
+
+## Использованные источники
+ 
+1. Miro Community — 100M Users. https://community.miro.com/general-news-2/100-million-users-and-counting-26253
+2. SimilarWeb — miro.com competitors traffic. https://www.similarweb.com/website/miro.com/competitors/
+3. UPDF — Miro Business Breakdown & Statistics. https://updf.com/knowledge/miro-business-breakdown/
+4. GetLatka — Miro Revenue, Customers. https://getlatka.com/companies/miro
+5. Fueler.io — Miro Usage & Growth Statistics 2026. https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics
+6. Wallarm Case Study — Miro infrastructure (AWS, WebSocket, billions requests/month). https://www.wallarm.com/resources/miro-case-study
+7. AWS Marketplace — Miro listing (Fortune 500, 100M users). https://aws.amazon.com/marketplace/pp/prodview-wky5ywoz3bxay
+8. System Design Handbook — Miro System Design Interview Guide (WebSocket, CRDT, CDN, Redis). https://www.systemdesignhandbook.com/guides/miro-system-design-interview/ 
+9. Oreate AI — Excalidraw vs Miro (CRDT analysis). https://www.oreateai.com/blog/excalidraw-vs-miro-choosing-your-digital-whiteboard-canvas/
+10. MassiveGRID — Nextcloud Whiteboard vs Miro (AWS infrastructure, data residency). https://massivegrid.com/blog/nextcloud-whiteboard-vs-miro/
+11. AWS Partner Blog — Using Miro to enable collaborative DevOps on AWS. https://aws.amazon.com/blogs/apn/using-miro-to-enable-collaborative-devops-on-aws/
+12. Tech Startups — Miro layoffs & revenue data. https://techstartups.com/2024/11/04/miro-a-unicorn-startup-once-valued-at-17-5-billion-cuts-18-of-its-workforce-amid-competitive-pressures/
