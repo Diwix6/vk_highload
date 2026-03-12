@@ -184,7 +184,7 @@ Miro хостит всю инфраструктуру на **AWS** [[Wallarm Cas
 | Регион | AWS Region | Обоснование |
 |---|---|---|
 | США (основной) | `us-east-1` (Вирджиния) | Штаб-квартира в Сан-Франциско, максимальная аудитория |
-| Европа | `eu-west-1` (Ирландия) или `eu-central-1` (Франкфурт) | Евразия (GDPR)|
+| Европа | `eu-west-1` (Ирландия) и `eu-central-1` (Франкфурт) | Евразия (GDPR)|
 | Азия | `ap-southeast-1` (Сингапур) | Покрытие Азиатско-Тихоокеанского региона (APAC) |
  
  [[Nextcloud Whiteboard vs Miro](https://massivegrid.com/blog/nextcloud-whiteboard-vs-miro/)].
