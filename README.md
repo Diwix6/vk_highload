@@ -67,7 +67,7 @@
 | **Monthly Active Users (MAU)** | 60 млн | |
 | **Daily Active Users (DAU)** | 3-6 млн | **Допущение** ( ≈5-10% от MAU ) |
 | **Среднее количество сессий/досок в день** | ≈2.56/день | **Допущение**  [[semrush]](https://www.semrush.com/website/miro.com/overview/) |
-| **Коллаборативных действий в месяц** | 1 млрд+ | [[UPDF Analysis, 2025]](https://updf.com/knowledge/miro-business-breakdown/) |
+| **Коллаборативных действий в месяц** | 1 млрд+ | [[UPDF Analysis]](https://updf.com/knowledge/miro-business-breakdown/) |
 | **Средняя длительность сессии** | ~45 мин | [[Fueler.io]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
 | **Среднегодовой рост пользовательской базы** | ~18% | [[Fueler.io]](https://fueler.io/blog/miro-usage-revenue-valuation-growth-statistics) |
 | **ARR (Annual Recurring Revenue)** | ~$560 млн (2023) | [[GetLatka]](https://getlatka.com/companies/miro) |
@@ -103,10 +103,11 @@
 | История изменений / undo-log | 27,5 млн DAU × 200 ops × 5 лет × 365 дней × 0,5 КБ | ~10 ПБ |
 | Сессии (Redis, in-memory) | 3 млн DAU × 1 КБ | ~3 ГБ |
 | **Итого** | | **~565 ПБ** |
+
 [[community.miro]](https://community.miro.com/ask-the-community-45/finding-out-miro-board-file-size-4834) 
 [[salessoftwareofficer]](https://salessoftwareofficer.com/miro-board-review-2025-key-insights-and-features/)
 
-Примечание: медиафайлы хранятся в S3-совместимых хранилищах (AWS S3). Реальные данные Miro не раскрывает публично.
+> Примечание: медиафайлы хранятся в S3-совместимых хранилищах (AWS S3). Реальные данные Miro не раскрывает публично.
 
 ## 2.2 Технические метрики
 
@@ -137,7 +138,7 @@
 | Экспорт доски | 0,5 | 23 | ~280 |
 | **Итого (все типы)** | 225,5 | **10 440** | **~125 280** |
 
-Примечание: данные о масштабе подтверждаются Wallarm: Miro требовал инфраструктуру, способную «самомасштабируемость для поддержки **миллиардов запросов в месяц**» [[Wallarm Case Study](https://www.wallarm.com/resources/miro-case-study)]. 1 млрд запросов/месяц ≈ 386 RPS среднее.
+> Примечание: данные о масштабе подтверждаются Wallarm: Miro требовал инфраструктуру, способную «самомасштабируемость для поддержки **миллиардов запросов в месяц**» [[Wallarm Case Study](https://www.wallarm.com/resources/miro-case-study)].
 
 | Тип данных | Формула расчёта для 1 пользователя | Общий объём данных |
 | :--- | :--- | :--- |
@@ -164,7 +165,7 @@
  
 ### 3.1 Географическое распределение трафика
  
-Miro используется в 180+ странах [[UPDF, 2025](https://updf.com/knowledge/miro-business-breakdown/)]. Основная аудитория концентрируется в Северной Америке и Западной Европе, значительная доля — в Азиатско-Тихоокеанском регионе.
+Miro используется в 180+ странах [[UPDF](https://updf.com/knowledge/miro-business-breakdown/)]. Основная аудитория концентрируется в Северной Америке и Западной Европе, значительная доля — в Азиатско-Тихоокеанском регионе.
 
 <br>
 <img width="1078" height="505" alt="изображение" src="https://github.com/user-attachments/assets/42c306bc-ee2a-461d-88c5-6104fc4b26a2" />
@@ -185,9 +186,9 @@ Miro хостит всю инфраструктуру на **AWS** [[Wallarm Cas
  
 | Регион | AWS Region | Обоснование |
 |---|---|---|
-| США (основной) | `us-east-1` (Virginia) | Штаб-квартира в Сан-Франциско, максимальная аудитория |
-| Европа | `eu-west-1` (Ирландия) или `eu-central-1` (Франкфурт) | Евразия |
-| Азия | `ap-southeast-1` (Сингапур) | Покрытие Азиатско-Тихоокеанского региона |
+| США (основной) | `us-east-1` (Вирджиния) | Штаб-квартира в Сан-Франциско, максимальная аудитория |
+| Европа | `eu-west-1` (Ирландия) или `eu-central-1` (Франкфурт) | Евразия (GDPR)|
+| Азия | `ap-southeast-1` (Сингапур) | Покрытие Азиатско-Тихоокеанского региона (APAC) |
  
  [[Nextcloud Whiteboard vs Miro](https://massivegrid.com/blog/nextcloud-whiteboard-vs-miro/)].
  
@@ -195,25 +196,57 @@ Miro хостит всю инфраструктуру на **AWS** [[Wallarm Cas
  
 **Технология: GeoDNS + Anycast**
  
-```
-Пользователь
-    │
-    ▼
-DNS-резолвер (Amazon Route)
-    │ → определяет ближайший регион по IP геолокации и latency
-    ▼
-Ближайший CDN (CloudFront / Fastly)
-    │
-    ├── Статический контент (JS, CSS, шаблоны) → CDN-кэш (hit)
-    └── Динамические запросы → Региональный балансировщик нагрузки → Backend
-```
+<img width="638" height="805" alt="изображение" src="https://github.com/user-attachments/assets/c2ae157f-cada-4ed5-9aa9-57404e76a714" />
 
-Miro — latency-sensitive приложение: задержка синхронизации курсоров и изменений на доске критична для UX. Целевой порог: **< 100 мс** для WebSocket-событий [[System Design Handbook](https://www.systemdesignhandbook.com/guides/miro-system-design-interview/)]
-Для снижения задержки при передаче реального времени дополнительно используется **WebRTC** (P2P для курсоров и voice) и **gRPC** для внутренних микросервисных вызовов [[Wallarm Case Study](https://www.wallarm.com/resources/miro-case-study)].
+
+Miro — latency-sensitive (чувстительное к задержке) приложение: задержка синхронизации курсоров и изменений на доске критична для UX. Целевой порог: **< 100 мс** для WebSocket-событий [[System Design Handbook](https://www.systemdesignhandbook.com/guides/miro-system-design-interview/)]
+Для снижения задержки при передаче реального времени дополнительно используется **WebRTC** (P2P для курсоров) и **gRPC** для внутренних микросервисных вызовов [[Wallarm Case Study](https://www.wallarm.com/resources/miro-case-study)].
 
 ## 4. Локальная балансировка нагрузки
  
 ### 4.1 Общая схема внутренней архитектуры
+
+<img width="1266" height="972" alt="изображение" src="https://github.com/user-attachments/assets/ee0ff40f-19d7-4188-a735-80dcaed202c1" />
+
+### 4.2 Балансировка на уровне L4 (транспортный)
+
+**Технология: AWS Network Load Balancer (NLB)**
+
+- Принимает TCP/UDP соединения на входе в регион
+- Работает без разбора HTTP-заголовков (stateless, сверхбыстрый)
+- Особенно важен для WebSocket: NLB поддерживает долгоживущие TCP-соединения (часы) без таймаутов
+- Sticky sessions реализуются через IP Hash для WebSocket-сессий (один клиент всегда попадает на один WebSocket-сервер)
+- Автоматическое масштабирование: AWS NLB масштабируется до миллионов запросов в секунду
+
+### 4.3 Балансировка на уровне L7 (прикладной)
+
+**Технология: Nginx / AWS Application Load Balancer (ALB)**
+
+- Терминация TLS (HTTPS, WSS)
+- Маршрутизация по (`/api/`, `/ws/`, `/export/`)
+
+### 4.4 Масштабирование сервисов (Kubernetes)
+
+Все backend-сервисы деплоятся в **Amazon EKS** (Elastic Kubernetes Service):
+
+| Сервис | Тип масштабирования | Обоснование |
+|---|---|---|
+| **API Gateway** | HPA (CPU > 60%) | Stateless, легко горизонтально масштабировать |
+| **Realtime Sync (WebSocket)** | HPA по числу открытых соединений | Один под держит ~10 000 WS-соединений; при росте DAU добавляются поды |
+| **Board Service** | HPA (CPU/Memory) | Операции чтения/записи доски |
+| **Media Service** | HPA + Keda (event-driven) | Пики при загрузке файлов |
+| **Export Service** | Job-based (по запросу) | Тяжёлые рендеринг-задачи; очередь через Kafka |
+
+**Cluster Autoscaler** добавляет EC2-ноды при нехватке ресурсов. Spot Instances используются для батч-задач (экспорт, обработка медиа) для сокращения затрат.
+
+### 4.5 Синхронизация в реальном времени (WebSocket + CRDT)
+
+**Выбор алгоритма синхронизации — CRDT (Conflict-free Replicated Data Types):**
+
+<img width="607" height="743" alt="изображение" src="https://github.com/user-attachments/assets/9a7d21f1-d681-4004-941d-6d6c1c55b770" />
+
+
+Miro использует CRDT для разрешения конфликтов при одновременном редактировании [[Excalidraw vs Miro analysis](https://www.oreateai.com/blog/excalidraw-vs-miro-choosing-your-digital-whiteboard-canvas/d81cb81eaf880f6e64d4da0fbb41b9be)]
 
 
 ## Использованные источники
