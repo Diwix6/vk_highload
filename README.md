@@ -392,10 +392,7 @@ Miro — latency-sensitive приложение: задержка синхрон
     ▼
 [L7 — Nginx] → TLS termination, HTTP routing по path
     │
-    ├─ /api/*      → REST API Gateway (stateless)
-    ├─ /ws/*       → Realtime Sync Service (WebSocket, CRDT)
-    ├─ /export/*   → Export Service (Kafka queue)
-    └─ /media/*    → Media Service / S3
+    └─ все остальное
 ```
 ---
 
