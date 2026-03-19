@@ -402,28 +402,158 @@ Miro — latency-sensitive приложение: задержка синхрон
  
 ### 4.1 Общая схема внутренней архитектуры
 
-<img width="1266" height="972" alt="изображение" src="https://github.com/user-attachments/assets/ee0ff40f-19d7-4188-a735-80dcaed202c1" />
+_Пока отсутствует_
 
 ### 4.2 Балансировка на уровне L4 (транспортный)
 
-**Технология: AWS Network Load Balancer (NLB)**
+#### Выбор технологии
 
-- Принимает TCP/UDP соединения на входе в регион
-- Работает без разбора HTTP-заголовков (stateless, сверхбыстрый)
-- Особенно важен для WebSocket: NLB поддерживает долгоживущие TCP-соединения (часы) без таймаутов
-- Sticky sessions реализуются через IP Hash для WebSocket-сессий (один клиент всегда попадает на один WebSocket-сервер)
-- Автоматическое масштабирование: AWS NLB масштабируется до миллионов запросов в секунду
+**HAProxy** — стандарт для L4-балансировки. Используется разными крупными компаниями, такими как GitHub, Reddit, Stack Overflow [[LogicMonitor — HAProxy Guide]](https://www.logicmonitor.com/blog/what-is-haproxy-and-what-is-it-used-for). Ключевые преимущества перед DNS-балансировкой или чистым Anycast:
+- Поддерживает **долгоживущие TCP-соединения** (WebSocket-сессии часами) без принудительных таймаутов.
+- Работает без разбора HTTP-заголовков → минимальная задержка [[System Overflow — L4 vs L7]](https://www.systemoverflow.com/learn/load-balancing/l4-vs-l7/l4-vs-l7-load-balancing-key-trade-offs-and-when-to-choose-each).
+
+#### Производительность одного сервера HAProxy
+
+| Параметр | Значение | Источник |
+|---|---|---|
+| Макс. HTTP RPS | **2 000 000 RPS** | гугл |
+| Макс. TCP одновременных содеинений | **~1 000 000** | с tuning net.ipv4 kernel params [[Facebook katran L4 LB]](https://github.com/facebookincubator/katran) |
+| Рабочий лимит | **700 000 ** | резерв 30% под пики |
+| Алгоритм балансировки | **IP Hash** (для WS) / Round-Robin (для HTTP) |  |
+
+
+#### Входные параметры для расчёта L4
+
+- Пиковые конкурентные соединения глобально: 200 000 DAU × 2 соединения (1 WS + 1 HTTP) = **400 000 conn**
+- Пиковый RPS глобально: **125 280 RPS**
+- Пиковый сетевой трафик: **~3,7 ГБ/с**
+
+#### Расчёт числа серверов L4 по ДЦ
+
+**Формула:** `N_active = [(400 000 × доля_ДЦ) / 700 000]`, затем `N_total = N_active + 1 резервный`
+
+| ДЦ | Доля | Конкурентных conn | N active | +1 резерв | **Итого** |
+|---|---|---|---|---|---|
+| DC-1 Ashburn | 20% | 80 000 | ⌈80 000 / 700 000⌉ = **1** | 1 | **2** |
+| DC-2 Oregon | 15% | 60 000 | ⌈60 000 / 700 000⌉ = **1** | 1 | **2** |
+| DC-3 Frankfurt | 20% | 80 000 | ⌈80 000 / 700 000⌉ = **1** | 1 | **2** |
+| DC-4 Warsaw | 12% | 48 000 | ⌈48 000 / 700 000⌉ = **1** | 1 | **2** |
+| DC-5 Singapore | 12% | 48 000 | ⌈48 000 / 700 000⌉ = **1** | 1 | **2** |
+| DC-6 Tokyo | 8% | 32 000 | ⌈32 000 / 700 000⌉ = **1** | 1 | **2** |
+| DC-7 Mumbai | 5% | 20 000 | ⌈20 000 / 700 000⌉ = **1** | 1 | **2** |
+| DC-8 São Paulo | 8% | 32 000 | ⌈32 000 / 700 000⌉ = **1** | 1 | **2** |
+| **Итого** | **100%** | **400 000** | | | **16 серверов L4** |
+
+**Спецификация одного L4-сервера (HAProxy):**
+
+| Параметр | Значение |
+|---|---|
+| CPU | 16–32 vCPU (ARM Graviton3 или x86 Xeon) |
+| RAM | 32 GB (HAProxy: ~1 KB per connection × 700 000 = ~700 MB; остаток на OS) |
+| NIC | 2× 25 GbE (bonding active-passive) |
+| OS | Linux, tuned: `net.core.somaxconn=65535`, `net.ipv4.tcp_max_syn_backlog=65535` |
+
+---
 
 ### 4.3 Балансировка на уровне L7 (прикладной)
 
-**Технология: Nginx / AWS Application Load Balancer (ALB)**
+#### Выбор технологии
 
-- Терминация TLS (HTTPS, WSS)
-- Маршрутизация по (`/api/`, `/ws/`, `/export/`)
+**Nginx** в роли reverse proxy и TLS terminator. L7-балансировщик понимает HTTP-протокол целиком: заголовки, cookies, URI-пути — и выполняет интеллектуальную маршрутизацию [[OneUptime — L4 vs L7]](https://oneuptime.com/blog/post/2026-01-27-load-balancing-l4-vs-l7/view):
+
+- **TLS termination** (HTTPS → HTTP, WSS → WS) — разгружает backend-серверы от криптографии.
+- **Path-based routing:** `/api/*` → API Gateway; `/ws/*` → WebSocket Service; `/export/*` → Export Service.
+- **WebSocket Upgrade:** переключение соединения с HTTP на WS (заголовки `Upgrade: websocket` + `Connection: Upgrade`).
+- **Rate limiting** и **DDoS protection** на уровне IP/User-Agent.
+- **Health checks** к backend-подам с автоматическим исключением упавших.
+
+#### Производительность одного сервера Nginx
+
+| Параметр | Значение | Источник |
+|---|---|---|
+| HTTP RPS с TLS (16-core, tuned) | **~50 000 RPS** | [[Loggly — Benchmarking 5 Load Balancers]](https://www.loggly.com/blog/benchmarking-5-popular-load-balancers-nginx-haproxy-envoy-traefik-and-alb/) |
+| Concurrent WebSocket connections (с kernel tuning) | **~50 000** | Практический предел при `worker_connections 65535` [[Zigpoll — Max Concurrent WS Connections]](https://www.zigpoll.com/blog/max-concurrent-socket-connections-node-express) |
+| WS message forwarding (events/s) | ~100 000 events/s | Масштабируется линейно с числом ядер |
+| RAM на 50 000 WS-соединений | ~200 MB (4 KB × 50 000) | — |
+| Рабочий лимит (70% от 50 000 WS) | **35 000 conn** | Резерв 30% для надёжности |
+
+#### Входные параметры для расчёта L7
+
+| Тип | Пиковая нагрузка (глобально) | Ограничитель |
+|---|---|---|
+| HTTP-запросы (board load, REST, media, export) | **14 180 RPS** | CPU (TLS + HTTP parsing) |
+| Конкурентные WebSocket-соединения | **200 000** | RAM + file descriptors |
+
+#### Расчёт числа серверов L7 по ДЦ
+
+**Формула:**
+```
+N(HTTP) = [HTTP_RPS / 50 000]
+N(WS)   = [WS_conn / 35 000]
+N_active = max(N(HTTP), N(WS))   ← выбираем bottleneck
+N_total  = N_active + 1 резервный
+```
+
+| ДЦ | Доля | HTTP RPS | WS conn | N(HTTP) | N(WS) | Bottleneck | N active | +1 резерв | **Итого** |
+|---|---|---|---|---|---|---|---|---|---|
+| DC-1 Ashburn | 20% | 2 836 | 40 000 | 1 | ⌈40 000/35 000⌉=**2** | WS | **2** | 1 | **3** |
+| DC-2 Oregon | 15% | 2 127 | 30 000 | 1 | ⌈30 000/35 000⌉=**1** | равно | **1** | 1 | **2** |
+| DC-3 Frankfurt | 20% | 2 836 | 40 000 | 1 | ⌈40 000/35 000⌉=**2** | WS | **2** | 1 | **3** |
+| DC-4 Warsaw | 12% | 1 702 | 24 000 | 1 | ⌈24 000/35 000⌉=**1** | равно | **1** | 1 | **2** |
+| DC-5 Singapore | 12% | 1 702 | 24 000 | 1 | ⌈24 000/35 000⌉=**1** | равно | **1** | 1 | **2** |
+| DC-6 Tokyo | 8% | 1 134 | 16 000 | 1 | ⌈16 000/35 000⌉=**1** | равно | **1** | 1 | **2** |
+| DC-7 Mumbai | 5% | 709 | 10 000 | 1 | ⌈10 000/35 000⌉=**1** | равно | **1** | 1 | **2** |
+| DC-8 São Paulo | 8% | 1 134 | 16 000 | 1 | ⌈16 000/35 000⌉=**1** | равно | **1** | 1 | **2** |
+| **Итого** | **100%** | **14 180** | **200 000** | | | | | | **18 серверов L7** |
+
+**Детальный расчёт для DC-1 Ashburn (наибольшая нагрузка, 20%):**
+```
+HTTP RPS peak = 14 180 × 20% = 2 836 RPS
+  → N(HTTP) = [2 836 / 50 000] = 1 сервер
+
+WS concurrent = 200 000 × 20% = 40 000 соединений
+  → N(WS) = [40 000 / 35 000] = 2 сервера
+
+Bottleneck: WebSocket connections → 2 active серверов
++ 1 standby = 3 сервера L7 в DC-1
+```
+
+**Спецификация одного L7-сервера (Nginx):**
+
+| Параметр | Значение |
+|---|---|
+| CPU | 16 vCPU (x86 Xeon или ARM) |
+| RAM | 32 GB |
+| NIC | 1× 10 GbE |
+| Nginx tuning | `worker_processes auto; worker_connections 65535; worker_rlimit_nofile 65535;` |
+
+---
+
+#### Итоговая таблица серверов балансировки
+
+| Уровень | Технология | Роль | Серверов всего |
+|---|---|---|---|
+| **L4** | HAProxy (TCP mode, IP Hash) | Приём TCP, sticky WS-сессии, защита от SYN-flood | **16** |
+| **L7** | Nginx (HTTP/WS, TLS termination) | TLS decrypt, path routing, WebSocket upgrade | **18** |
+| **Итого** | | | **34 сервера** |
+
+| ДЦ | L4 | L7 | Доля | Покрываемый регион |
+|---|---|---|---|---|
+| DC-1 Ashburn, USA | 2 | 3 | 20% | США Восток, Канада |
+| DC-2 Oregon, USA | 2 | 2 | 15% | США Запад |
+| DC-3 Frankfurt, DE | 2 | 3 | 20% | Зап. и Центр. Европа |
+| DC-4 Warsaw, PL | 2 | 2 | 12% | Вост. Европа, Россия, СНГ |
+| DC-5 Singapore | 2 | 2 | 12% | ЮВА, Австралия |
+| DC-6 Tokyo, JP | 2 | 2 | 8% | Япония, Корея, СВ Азия |
+| DC-7 Mumbai, IN | 2 | 2 | 5% | Индия, Ближний Восток |
+| DC-8 São Paulo, BR | 2 | 2 | 8% | Лат. Америка |
+| **Итого** | **16** | **18** | **100%** | |
+
+> Расчёт ведётся только для серверов балансировки. Backend-сервисы (WebSocket Sync, Board Service, Media Service и др.) масштабируются отдельно через Kubernetes HPA и в данный расчёт не включены.
 
 ### 4.4 Масштабирование сервисов (Kubernetes)
 
-Все backend-сервисы деплоятся в **Amazon EKS** (Elastic Kubernetes Service):
+Все backend-сервисы деплоятся в **Kubernetes (EKS / self-managed)**:
 
 | Сервис | Тип масштабирования | Обоснование |
 |---|---|---|
@@ -436,12 +566,197 @@ Miro — latency-sensitive приложение: задержка синхрон
 
 ### 4.5 Синхронизация в реальном времени (WebSocket + CRDT)
 
-**Выбор алгоритма синхронизации — CRDT (Conflict-free Replicated Data Types):**
+_Схему я пока не переделал_
 
-<img width="607" height="743" alt="изображение" src="https://github.com/user-attachments/assets/9a7d21f1-d681-4004-941d-6d6c1c55b770" />
+## 5. Логическая схема базы данных
+### 5.1 Классификация хранимых данных 
+Miro имеет несколько разных типов данных, каждый из которых требует своего класса хранилища.
+
+| Тип данных | Характер нагрузки | Объём (из 2. Расчет нагрузки) | Подходящий класс СУБД |
+|---|---|---|---|
+| **Доски** (векторный контент, метаданные) | Read-heavy + Write burst во время сессий | ~6.8 ПБ | Реляционная (PostgreSQL) |
+| **Профили пользователей, права, инвайты** | Read-heavy | ~23 ТБ | Реляционная (PostgreSQL) |
+| **CRDT-операции** (дельты изменений объектов на доске) | ~111 K RPS пик | ~180 ТБ | Дисковая NoSQL (Cassandra) |
+| **Сессии, онлайн-статус, позиции курсоров** | Read + Write, очень низкая latency обязательна | ~3 ГБ (in-memory) | In-Memory (Redis) |
+| **Медиафайлы** (изображения, PDF) | Write once, read many, большой объём | ~547 ПБ | Объектное хранилище (S3) |
+| **Аналитика активности досок** | Аналитические запросы, append-only | ~365 ТБ | Аналитическая колоночная (ClickHouse) |
+| **Очередь задач экспорта** | гарантированная доставка | — | Сервер очередей (Kafka) |
+
+### 5.2 Логическая ER-схема
+ 
+ 
+```mermaid
+erDiagram
+ 
+    %% ─── PostgreSQL: пользователи и организации ───────────────────
+    USER {
+        uuid   user_id       PK
+        string email
+        string password_hash
+        string full_name
+        string avatar_url
+        string plan
+        timestamp created_at
+        timestamp last_active_at
+    }
+ 
+    TEAM {
+        uuid   team_id    PK
+        string name
+        string domain
+        string plan
+        uuid   owner_id   FK
+        timestamp created_at
+    }
+ 
+    TEAM_MEMBER {
+        uuid   team_id   FK
+        uuid   user_id   FK
+        string role
+        timestamp joined_at
+    }
+ 
+    %% ─── PostgreSQL: доски ─────────────────────────────────────────
+    BOARD {
+        uuid   board_id        PK "shard key"
+        uuid   team_id         FK
+        uuid   owner_id        FK
+        string title
+        string access_level
+        jsonb  snapshot        "последний CRDT-снимок"
+        bigint last_crdt_seq
+        timestamp created_at
+        timestamp updated_at
+    }
+ 
+    BOARD_MEMBER {
+        uuid   board_id   FK "shard key"
+        uuid   user_id    FK
+        string role
+        timestamp invited_at
+    }
+ 
+    BOARD_OBJECT {
+        uuid   object_id   PK
+        uuid   board_id    FK "shard key"
+        uuid   created_by  FK
+        string type
+        jsonb  geometry
+        jsonb  style
+        int    z_index
+        timestamp created_at
+        timestamp updated_at
+    }
+ 
+    COMMENT {
+        uuid      comment_id   PK
+        uuid      board_id     FK "shard key"
+        uuid      object_id    FK
+        uuid      author_id    FK
+        uuid      parent_id    FK
+        text      body
+        string    status
+        timestamp created_at
+    }
+ 
+    MEDIA_FILE {
+        uuid   file_id      PK
+        uuid   board_id     FK "shard key"
+        uuid   uploaded_by  FK
+        string s3_key
+        string content_type
+        bigint size_bytes
+        timestamp uploaded_at
+    }
+ 
+    FRAME {
+        uuid   frame_id    PK
+        uuid   board_id    FK "shard key"
+        string title
+        jsonb  bounds
+        int    order_index
+        timestamp created_at
+    }
+ 
+    EXPORT_JOB {
+        uuid      job_id       PK
+        uuid      board_id     FK
+        uuid      requested_by FK
+        string    format
+        string    status
+        string    s3_result_key
+        timestamp created_at
+        timestamp completed_at
+    }
+ 
+    %% ─── Cassandra: CRDT-лог ──────────────────────────────────────
+    CRDT_OPERATION {
+        uuid      board_id      PK "partition key"
+        bigint    seq           PK "clustering key"
+        uuid      operation_id
+        uuid      user_id
+        string    op_type
+        uuid      object_id
+        jsonb     delta
+        timestamp created_at
+    }
+ 
+    %% ─── Redis: in-memory состояние ──────────────────────────────
+    SESSION {
+        string  session_id   PK "key: session:{id}"
+        uuid    user_id
+        string  ip_address
+        int     ttl_seconds
+    }
+ 
+    CURSOR_STATE {
+        string  key         PK "cursor:{board_id}:{user_id}"
+        float   x
+        float   y
+        int     ttl_ms
+    }
+ 
+    BOARD_CACHE {
+        string  key         PK "board_meta:{board_id}"
+        jsonb   metadata
+        int     ttl_seconds
+    }
+ 
+    %% ─── ClickHouse: аналитика ───────────────────────────────────
+    ACTIVITY_LOG {
+        uuid      user_id
+        uuid      board_id
+        string    action_type
+        jsonb     action_meta
+        timestamp event_time   "partition key"
+        string    dc_region
+    }
+ 
+    %% ─── Связи ───────────────────────────────────────────────────
+    USER         ||--o{ TEAM_MEMBER    : "состоит в"
+    TEAM         ||--o{ TEAM_MEMBER    : "содержит"
+    TEAM         ||--o{ BOARD          : "владеет"
+    USER         ||--o{ BOARD          : "создаёт"
+    BOARD        ||--o{ BOARD_MEMBER   : "имеет участников"
+    USER         ||--o{ BOARD_MEMBER   : "является участником"
+    BOARD        ||--o{ BOARD_OBJECT   : "содержит объекты"
+    BOARD        ||--o{ COMMENT        : "содержит комментарии"
+    BOARD_OBJECT ||--o{ COMMENT        : "прикреплены к объекту"
+    COMMENT      ||--o{ COMMENT        : "ответы (parent)"
+    BOARD        ||--o{ MEDIA_FILE     : "хранит медиа"
+    BOARD        ||--o{ FRAME          : "содержит фреймы"
+    BOARD        ||--o{ EXPORT_JOB     : "экспортируется"
+    BOARD        ||--o{ CRDT_OPERATION : "CRDT-лог (Cassandra)"
+    USER         ||--o{ SESSION        : "сессия (Redis)"
+    USER         ||--o{ CURSOR_STATE   : "позиция курсора (Redis)"
+    BOARD        ||--o{ BOARD_CACHE    : "кэш метаданных (Redis)"
+    USER         ||--o{ ACTIVITY_LOG   : "логи (ClickHouse)"
+    BOARD        ||--o{ ACTIVITY_LOG   : "логи (ClickHouse)"
+```
+ 
 
 
-Miro использует CRDT для разрешения конфликтов при одновременном редактировании [[Excalidraw vs Miro analysis](https://www.oreateai.com/blog/excalidraw-vs-miro-choosing-your-digital-whiteboard-canvas/d81cb81eaf880f6e64d4da0fbb41b9be)]
+_Miro использует CRDT для разрешения конфликтов при одновременном редактировании [[Excalidraw vs Miro analysis](https://www.oreateai.com/blog/excalidraw-vs-miro-choosing-your-digital-whiteboard-canvas/d81cb81eaf880f6e64d4da0fbb41b9be)]_
 
 
 ## Использованные источники
