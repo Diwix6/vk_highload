@@ -228,7 +228,7 @@ Miro ориентирован на бизнес-пользователей, чт
 - На бесплатного пользователя до 3 досок.
 - На огранизацию примерно 10-50 досок (250 тыс. организаций в Miro).
 - На платного пользователя (около 10-20% от общего числа пользователей) - 5-20 досок на платного пользователя.
-- По грубой оценке в среднем на пользователя 0.1 - 1 досок
+- По грубой оценке в среднем на пользователя ~ 1 доска
 - Для среднего количества колаборационных действия на 1 сессию, возьмем 5.
 
 **Базовые параметры:**
@@ -251,11 +251,11 @@ Miro ориентирован на бизнес-пользователей, чт
 
 | Тип данных | Формула расчёта для 1 пользователя | Общий объём данных |
 | :--- | :--- | :--- |
-| **Доски (boards)** | (0.1 -- 1) доски × 365 д. × 30 МБ ≈ (1.7 -- 17) ГБ | **≈(110 -- 1110) ПБ** |
+| **Доски (boards)** | 0.27 доски × 365 д. × 30 МБ ≈ 2.7 ГБ | **≈300 ПБ** |
 | **Коллаборативные действия** | 5 действий × 365 × 1 КБ ≈ 1.8 МБ | **≈180 ТБ** |
 | **Сессии/логи** | 1 сессия × 365 × 10 КБ ≈ 3.65 МБ | **≈365 ТБ** |
 | **Шаблоны/экспорты** | 0.3 × 365 × 5 КБ ≈ 0.55 МБ | **≈55 ТБ** |
-| **Итого** | **≈1.1 ГБ на пользователя** | **≈110 ПБ**  [[miro]](https://miro.com/product-development/product-metrics/)
+| **Итого** | **≈3.0 ГБ на пользователя** | **≈300 ПБ**  [[miro]](https://miro.com/product-development/product-metrics/)
 
 #### Сетевой трафик
  
@@ -677,20 +677,197 @@ erDiagram
     USER         ||--o{ CURSOR_STATE   : "позиция курсора"
 ```
  
-### 5.3 Итоговая схема баз данных
- 
-| СУБД | Класс | Назначение | Масштабирование | Серверов |
-|---|---|---|---|---|
-| **PostgreSQL** | Реляционная дисковая | Доски, пользователи, права | Шардинг по `board_id`, 340 шардов × 1M+2S | **1 020** |
-| **Cassandra** | Дисковая NoSQL | CRDT-лог операций | Peer-to-peer, RF=3 | **120** |
-| **Redis** | In-Memory | Сессии, курсоры, кэш | Cluster, 1M+1S | **16** |
-| **ClickHouse** | Аналитическая колоночная | Логи активности | ReplicatedMergeTree + Distributed | **16** |
-| **Kafka** | Сервер очередей | Очередь экспорта, event bus | 3 брокера × 8 ДЦ | **24** |
-| **S3** | Объектное хранилище | Медиафайлы (547 ПБ) | Облачное | — |
-| **Итого** | | | | **1 196** |
- 
+## 6. Физическая схема базы данных
+### 6.1 Схема таблиц, индексов и шардирования
+```mermaid
+erDiagram
 
-_Miro использует CRDT для разрешения конфликтов при одновременном редактировании [[Excalidraw vs Miro analysis](https://www.oreateai.com/blog/excalidraw-vs-miro-choosing-your-digital-whiteboard-canvas/d81cb81eaf880f6e64d4da0fbb41b9be)]_
+%% ───────── PostgreSQL (шардинг по board_id) ─────────
+
+USER {
+    uuid user_id PK
+    string email
+    string password_hash
+    string full_name
+    string avatar_url
+    string plan
+    boolean is_active
+    timestamp created_at
+}
+
+BOARD {
+    uuid board_id PK "shard key"
+    uuid owner_id FK
+    string title
+    string access_level
+    jsonb snapshot
+    bigint last_crdt_seq
+    timestamp created_at
+}
+
+BOARD_MEMBER {
+    uuid board_id FK "shard key"
+    uuid user_id FK
+    string role
+}
+
+BOARD_OBJECT {
+    uuid object_id PK
+    uuid board_id FK "shard key"
+    uuid created_by FK
+    string type
+    jsonb geometry
+    int z_index
+}
+
+COMMENT {
+    uuid comment_id PK
+    uuid board_id FK "shard key"
+    uuid object_id FK
+    uuid author_id FK
+    text body
+    timestamp created_at
+}
+
+EXPORT_JOB {
+    uuid job_id PK
+    uuid board_id FK
+    uuid user_id FK
+    string status
+}
+
+%% ───────── Cassandra ─────────
+
+CRDT_OPERATION {
+    uuid board_id PK
+    bigint seq PK
+    json delta
+    timestamp created_at
+}
+
+%% ───────── Redis ─────────
+
+SESSION {
+    string session_id PK
+    uuid user_id
+    timestamp created_at
+}
+
+CURSOR_STATE {
+    string cursor_key PK
+    uuid board_id
+    uuid user_id
+    float x
+    float y
+}
+
+%% ───────── Связи ─────────
+
+USER ||--o{ BOARD : creates
+USER ||--o{ BOARD_MEMBER : member
+BOARD ||--o{ BOARD_MEMBER : access
+BOARD ||--o{ BOARD_OBJECT : objects
+BOARD_OBJECT ||--o{ COMMENT : comments
+USER ||--o{ COMMENT : writes
+BOARD ||--o{ EXPORT_JOB : export
+BOARD ||--o{ CRDT_OPERATION : operations
+USER ||--o{ SESSION : login
+USER ||--o{ CURSOR_STATE : cursor
+```
+
+### 6.2 Описание таблиц
+| Таблица | СУБД | Назначение |
+|---|---|---|
+| `USER` | PostgreSQL | Профили пользователей, аутентификация | 
+| `BOARD` | PostgreSQL | Метаданные досок и CRDT-снимок состояния | 
+| `BOARD_MEMBER` | PostgreSQL | Роли участников доски |
+| `BOARD_OBJECT` | PostgreSQL | Все объекты на холсте (фигуры, текст, стикеры, фреймы) |
+| `COMMENT` | PostgreSQL | Комментарии к объектам, курсорам, ответы |
+| `EXPORT_JOB` | PostgreSQL | Задачи экспорта PNG/PDF |
+| `CRDT_OPERATION` | Cassandra | Лог всех CRDT-операций (дельты изменений) |
+| `SESSION` | Redis | Активные сессии пользователей |
+| `CURSOR_STATE` | Redis | Позиции курсоров на доске в реальном времени | 
+
+
+### 6.3 Индексы
+
+| Таблица        | Поле          | Тип индекса     | Зачем нужен                                               |
+| -------------- | ------------- | --------------- | --------------------------------------------------------- |
+| `USER`         | `email`       | UNIQUE B-Tree   | Используется при входе в систему и должен быть уникальным |
+| `USER`         | `updated_at`  | B-Tree          | Позволяет быстро находить недавно изменённые профили      |
+| `BOARD`        | `owner_id`    | B-Tree          | Получение списка досок пользователя                       |
+| `BOARD`        | `title`       | GIN (full-text) | Поиск досок по названию                                   |
+| `BOARD`        | `is_archived` | Partial B-Tree  | Быстрая выборка только активных досок                     |
+| `BOARD_MEMBER` | `user_id`     | B-Tree          | Поиск досок, в которых участвует пользователь             |
+| `BOARD_OBJECT` | `board_id`    | B-Tree          | Получение всех объектов конкретной доски                  |
+| `BOARD_OBJECT` | `type`        | B-Tree          | Фильтрация объектов по типу                               |
+| `BOARD_OBJECT` | `geometry`    | GIN             | Используется при поиске объектов в области экрана         |
+| `COMMENT`      | `board_id`    | B-Tree          | Получение комментариев доски                              |
+| `COMMENT`      | `object_id`   | B-Tree          | Комментарии конкретного объекта                           |
+| `COMMENT`      | `parent_id`   | B-Tree          | Поддержка веток комментариев                              |
+| `COMMENT`      | `status`      | Partial B-Tree  | Быстрая выборка нерешённых комментариев                   |
+| `EXPORT_JOB`   | `status`      | B-Tree          | Воркеры выбирают задачи со статусом `pending`             |
+
+
+### 6.4 Выбор СУБД, шардирование и резервирование
+
+| Таблица          | СУБД       | Шардирование              | Репликация                              |
+| ---------------- | ---------- | ------------------------- | --------------------------------------- |
+| `USER`           | PostgreSQL | По `user_id`              | Master + 2 реплики                      |
+| `BOARD`          | PostgreSQL | По `board_id`             | Master + 2 реплики                      |
+| `BOARD_MEMBER`   | PostgreSQL | По `board_id`             | Хранится на том же шарде, что и `BOARD` |
+| `BOARD_OBJECT`   | PostgreSQL | По `board_id`             | Совместно с `BOARD`                     |
+| `COMMENT`        | PostgreSQL | По `board_id`             | Совместно с `BOARD`                     |
+| `EXPORT_JOB`     | PostgreSQL | По `board_id`             | Совместно с `BOARD`                     |
+| `CRDT_OPERATION` | Cassandra  | Partition key: `board_id` | Replication factor = 3                  |
+| `SESSION`        | Redis      | Hash-slot по `session_id` | Master + Replica                        |
+| `CURSOR_STATE`   | Redis      | Hash-slot по `board_id`   | Master + Replica                        |
+
+Обоснование:
+ - PostgreSQL используется для основных данных (пользователи, доски, объекты).
+ - Cassandra хорошо подходит для журнала операций, потому что она оптимизирована для append-записей.
+ - Redis используется для временных данных и real-time состояния.
+
+### 6.5 Клиентские библиотеки
+
+| Система    | Клиент             | Особенности                                         |
+| ---------- | ------------------ | --------------------------------------------------- |
+| Cassandra  | DataStax Driver    | драйвер автоматически распределяет запросы по узлам |
+| Redis      | ioredis / redis-py | используется режим Redis Cluster                    |
+| S3         | AWS SDK            | используется для хранения экспортов и медиа         |
+
+
+### 6.6 Балансировка запросов и мультиплексирование подключений
+Для PostgreSQL используется PgBouncer.
+
+Схема работы:
+
+Клиенты приложения -> PgBouncer -> PostgreSQL
+
+PgBouncer принимает большое количество соединений от приложения и перераспределяет их на небольшое количество реальных соединений с базой данных.
+
+**Это позволяет:**
+
+ - уменьшить нагрузку на PostgreSQL
+ - обслуживать тысячи клиентов одновременно
+
+**Запросы разделяются:**
+
+ - запись -> master
+ - чтение -> read-replica
+
+### 6.7 Схема резервного копирования
+
+| Система    | Метод                    | Частота                            |
+| ---------- | ------------------------ | ---------------------------------- |
+| PostgreSQL | Полный backup + WAL      | Полный раз в неделю, WAL постоянно |
+| Cassandra  | Snapshot SSTables        | 1 раз в день                       |
+| Redis      | RDB snapshot             | каждые 5 минут                     |
+| Redis      | AOF                      | запись всех операций               |
+| S3         | Cross-region replication | автоматически                      |
+
+
+
 
 
 ## Использованные источники
