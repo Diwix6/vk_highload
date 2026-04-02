@@ -787,17 +787,17 @@ USER ||--o{ CURSOR_STATE : cursor
 
 ### 6.4 Выбор СУБД, шардирование и резервирование
 
-| Таблица          | СУБД       | Шардирование              | Репликация                              |
-| ---------------- | ---------- | ------------------------- | --------------------------------------- |
-| `USER`           | PostgreSQL | По `user_id`              | Master + 2 реплики                      |
-| `BOARD`          | PostgreSQL | По `board_id`             | Master + 2 реплики                      |
-| `BOARD_MEMBER`   | PostgreSQL | По `board_id`             | Хранится на том же шарде, что и `BOARD` |
-| `BOARD_OBJECT`   | PostgreSQL | По `board_id`             | Совместно с `BOARD`                     |
-| `COMMENT`        | PostgreSQL | По `board_id`             | Совместно с `BOARD`                     |
-| `EXPORT_JOB`     | PostgreSQL | По `board_id`             | Совместно с `BOARD`                     |
-| `CRDT_OPERATION` | Cassandra  | Partition key: `board_id` | Replication factor = 3                  |
-| `SESSION`        | Redis      | Hash-slot по `session_id` | Master + Replica                        |
-| `CURSOR_STATE`   | Redis      | Hash-slot по `board_id`   | Master + Replica                        |
+| Таблица          | СУБД       | Репликация                              |
+| ---------------- | ----------  | --------------------------------------- |
+| `USER`           | PostgreSQL  | Master + 2 реплики                      |
+| `BOARD`          | PostgreSQL  | Master + 2 реплики                      |
+| `BOARD_MEMBER`   | PostgreSQL  | Хранится на том же шарде, что и `BOARD` |
+| `BOARD_OBJECT`   | PostgreSQL  | Совместно с `BOARD`                     |
+| `COMMENT`        | PostgreSQL  | Совместно с `BOARD`                     |
+| `EXPORT_JOB`     | PostgreSQL  | Совместно с `BOARD`                     |
+| `CRDT_OPERATION` | Cassandra  | Replication factor = 3                  |
+| `SESSION`        | Redis      | Master + Replica                        |
+| `CURSOR_STATE`   | Redis      | Master + Replica                        |
 
 Шардируются толькуо таблицы с высокой локальностью по доске (board-centric). Глобальные таблицы не шардируются.
 
