@@ -752,7 +752,6 @@ BOARD_MEMBER {
 }
 
 BOARD_OBJECT {
-PRIMARY KEY (board_id, object_id)
     uuid object_id PK
     uuid board_id FK "shard key"
     uuid created_by FK
@@ -764,7 +763,6 @@ PRIMARY KEY (board_id, object_id)
 }
 
 COMMENT {
-PRIMARY KEY (board_id, comment_id)
     uuid comment_id PK
     uuid board_id FK "shard key"
     uuid object_id FK
