@@ -752,7 +752,7 @@ BOARD_MEMBER {
 }
 
 BOARD_OBJECT {
-    uuid object_id PK
+    bigint object_id PK
     uuid board_id FK "shard key"
     uuid created_by FK
     string type
@@ -763,7 +763,7 @@ BOARD_OBJECT {
 }
 
 COMMENT {
-    uuid comment_id PK
+    bigint comment_id PK
     uuid board_id FK "shard key"
     uuid object_id FK
     uuid author_id FK
@@ -860,11 +860,11 @@ BOARD ||--o{ CURSOR_STATE : cursor
 | `BOARD` | `title` | GIN (tsvector) | ~20 токенов × 8 Б | 27 млн | **~4 ГБ** | Full-text поиск |
 | `BOARD` | `is_archived` | Partial B-Tree (false) | 8 байт | ~25 млн активных | **~500 МБ** | Фильтр активных досок |
 | `BOARD_MEMBER` | `user_id` | B-Tree | 16 байт | 135 млн | **~5 ГБ** | Доски пользователя |
-| `BOARD_OBJECT` | `(board_id, object_id)` | PRIMARY KEY (B-Tree) | 32 байта | 2.7 млрд | **~216 ГБ** | Объекты доски — самый большой индекс |
+| `BOARD_OBJECT` | `(board_id, object_id)` | PRIMARY KEY (B-Tree) | 24 байта | 2.7 млрд | **~162 ГБ** | Объекты доски — самый большой индекс |
 | `BOARD_OBJECT` | `type` | B-Tree | 8 байт | 2.7 млрд | **~54 ГБ** | Фильтрация по типу |
 | `BOARD_OBJECT` | `geometry` | GIN (jsonb) | ~5 ключей × 8 Б | 2.7 млрд | **~270 ГБ** | Поиск в viewport — наиболее ёмкий |
 | `BOARD_OBJECT` | `is_deleted` | Partial B-Tree (false) | 8 байт | ~2.5 млрд | **~50 ГБ** | Мягкое удаление |
-| `COMMENT` | `(board_id, comment_id)` | PRIMARY KEY (B-Tree) | 32 байтf | 270 млн | **~21 ГБ** | Комментарии доски |
+| `COMMENT` | `(board_id, comment_id)` | PRIMARY KEY (B-Tree) | 24 байтf | 270 млн | **~16 ГБ** | Комментарии доски |
 | `COMMENT` | `object_id` | B-Tree | 16 байт | 270 млн | **~10 ГБ** | Комментарии к объекту |
 | `COMMENT` | `parent_id` | B-Tree | 16 байт | 270 млн | **~10 ГБ** | Threading |
 | `COMMENT` | `status` | Partial B-Tree (open) | 8 байт | ~50 млн | **~1 ГБ** | Нерешённые комментарии |
