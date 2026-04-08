@@ -390,7 +390,53 @@ Miro — latency-sensitive приложение: задержка синхрон
  
 ### 4.1 Общая схема внутренней архитектуры
 
+```mermaid
+graph TD
+    subgraph "Клиент"
+        Browser[Браузер / WebSocket]
+    end
 
+    subgraph "Глобальная балансировка"
+        GeoDNS[GeoDNS + BGP Anycast]
+    end
+
+    subgraph "L4 (per DC)"
+        HAProxy[HAProxy<br/>TCP / IP Hash]
+    end
+
+    subgraph "L7 (per DC)"
+        Nginx[Nginx<br/>TLS + routing]
+    end
+
+    subgraph "Kubernetes (EKS)"
+        APIGW[API Gateway]
+        WS[Realtime Sync<br/>WebSocket]
+        Board[Board Service<br/>CRDT]
+        Media[Media Service]
+        Export[Export Service]
+    end
+
+    subgraph "Хранилища"
+        PG[PostgreSQL + Citus<br/>boards / objects]
+        Cass[Cassandra<br/>CRDT log]
+        Redis[Redis<br/>cursors / sessions]
+        S3[S3<br/>media]
+        Kafka[Kafka<br/>outbox]
+    end
+
+    Browser --> GeoDNS
+    GeoDNS --> HAProxy
+    HAProxy --> Nginx
+    Nginx --> APIGW
+    Nginx --> WS
+    APIGW --> Board
+    WS --> Board
+    Board --> PG
+    Board --> Cass
+    WS --> Redis
+    Media --> S3
+    Export --> Kafka
+```
 
 ### 4.2 Балансировка на уровне L4 (транспортный)
 
@@ -524,7 +570,22 @@ Bottleneck: WebSocket connections → 2 active серверов
 
 ### 4.5 Синхронизация в реальном времени (WebSocket + CRDT)
 
-_Схему я пока не переделал_
+```mermaid
+sequenceDiagram
+    participant C1 as Клиент 1
+    participant WS as WebSocket Service
+    participant C2 as Клиент 2
+    participant Cass as Cassandra (CRDT log)
+    participant Redis as Redis (cursors)
+
+    C1->>C1: Применить операцию локально (CRDT)
+    C1->>WS: Delta (op + seq) по WS
+    WS->>Cass: Записать в CRDT_OPERATION (board_id + seq)
+    WS->>Redis: Обновить cursor (throttle 20 fps)
+    WS->>C2: Broadcast delta (только изменения)
+    C2->>C2: Merge CRDT (LWW/OR-Set)
+    Note over C1,C2: Delta sync при reconnect<br/>Snapshot + last_seq
+```
 
 ## 5. Логическая схема базы данных
 ### 5.1 Классификация хранимых данных 
@@ -691,6 +752,7 @@ BOARD_MEMBER {
 }
 
 BOARD_OBJECT {
+PRIMARY KEY (board_id, object_id)
     uuid object_id PK
     uuid board_id FK "shard key"
     uuid created_by FK
@@ -702,6 +764,7 @@ BOARD_OBJECT {
 }
 
 COMMENT {
+PRIMARY KEY (board_id, comment_id)
     uuid comment_id PK
     uuid board_id FK "shard key"
     uuid object_id FK
@@ -773,33 +836,21 @@ BOARD ||--o{ CURSOR_STATE : cursor
 
 ### 6.2 Описание таблиц и денормализация
 
-| Таблица | СУБД | Назначение | Денормализация |
-|---|---|---|---|
-| `USER` | PostgreSQL (global) | Профили, аутентификация | `full_name` и `color` продублированы в `CURSOR_STATE` и `COMMENT.author_name` — устраняет join при каждом broadcast |
-| `BOARD` | PostgreSQL (global) | Метаданные досок, CRDT-снимок | `snapshot (jsonb)` — полное состояние доски; исключает полный replay Cassandra-лога при открытии |
-| `BOARD_MEMBER` | PostgreSQL/Citus | Роли участников | Co-located с `BOARD` по `board_id` |
-| `BOARD_OBJECT` | PostgreSQL/Citus | Объекты на холсте | `type` — строка, не FK на справочник; исключает lookup join при рендере |
-| `COMMENT` | PostgreSQL/Citus | Комментарии, threading | `author_name` денормализован из `USER.full_name`; `board_x/board_y` — координаты без join к объекту |
-| `EXPORT_JOB` | PostgreSQL/Citus | Задачи экспорта PNG/PDF | `status` обновляется воркером напрямую — не требует join с Kafka |
-| `CRDT_OPERATION` | Cassandra | Лог всех CRDT-операций | `delta (jsonb)` — единый формат без нормализации по типам |
-| `SESSION` | Redis | Активные сессии | key-value, TTL 30 мин |
-| `CURSOR_STATE` | Redis | Позиции курсоров на доске | Хранится как **Redis Hash** с ключом `board:{board_id}:cursors`, field = `user_id` → `{x,y,name,color}`. Один ключ = все курсоры доски. Устраняет связь с USER — все данные для broadcast уже в одной структуре. TTL 500 мс |
-
-| Таблица          | Кол-во строк (оценка)       | Средний размер строки | Общий объём     | Обоснование |
-|------------------|-----------------------------|-----------------------|-----------------|-------------|
-| `USER`           | 100 млн                    | 100 КБ               | ~10 ТБ         | Профили + аватарки (раздел 2.2) |
-| `BOARD`          | 27 млн                    | 10 КБ                | ~270 ГБ | Метаданные + snapshot (6,8 ПБ векторных данных распределены) |
-| `BOARD_MEMBER`   | 135 млн | 200 Б                | ~27 ТБ        | Связи |
-| `BOARD_OBJECT`   | 2.7 млрд | 2 КБ                 | ~5.4 ТБ        | JSONB geometry + style |
-| `COMMENT`        | 270 млн | 1 КБ              | ~270 ГБ          | Текст + threading |
-| `CRDT_OPERATION` | 45 млрд | 500 Б           | ~22.5 ТБ        | Лог дельт (Cassandra) |
-| `EXPORT_JOB`     | 3.5 млн | 1 КБ                 | ~13.5 ГБ          | Задачи экспорта |
-| `SESSION` + `CURSOR_STATE` | ~200 тыс. (пиковый DAU) | 1 КБ             | ~200 МБ (Redis) | In-memory |
-
-**Итого по PostgreSQL:** ~16 ТБ .
-
+| Таблица          | СУБД       | Назначение                                 | Денормализация                                                                                                                          |
+| ---------------- | ---------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `USER`           | PostgreSQL | Профили пользователей и аутентификация     | `full_name` и `color` дублируются в `CURSOR_STATE` и `COMMENT.author_name`, чтобы избежать join при отправке событий в реальном времени |
+| `BOARD`          | PostgreSQL | Метаданные доски                           | `snapshot (jsonb)` хранит полный снимок состояния доски для быстрой загрузки                                                            |
+| `BOARD_MEMBER`   | PostgreSQL | Связь пользователей и досок                | хранит роль пользователя на доске                                                                                                       |
+| `BOARD_OBJECT`   | PostgreSQL | Объекты на холсте                          | поле `type` хранится строкой, без отдельного справочника                                                                                |
+| `COMMENT`        | PostgreSQL | Комментарии и ветки обсуждений             | `author_name` дублируется из `USER.full_name`                                                                                           |
+| `EXPORT_JOB`     | PostgreSQL | Задачи экспорта доски                      | статус обновляется воркером напрямую                                                                                                    |
+| `CRDT_OPERATION` | Cassandra  | Журнал операций совместного редактирования | операции хранятся как JSON                                                                                                              |
+| `SESSION`        | Redis      | Активные пользовательские сессии           | key-value структура                                                                                                                     |
+| `CURSOR_STATE`   | Redis      | Позиции курсоров пользователей             | Redis Hash `board:{id}:cursors`                                                                                                         |
 
 ### 6.3 Индексы и их размеры
+
+> Для таблиц `BOARD_OBJECT` и `COMMENT` используются составные первичные ключи `(board_id, object_id)` и `(board_id, comment_id)`.
 
 **Методика расчёта:** размер B-Tree индекса ≈ `N_строк × размер_ключа × 2.5` (overhead btree ~2.5× от сырых данных); GIN-индекс ≈ `N_строк × avg_tokens × 8 байт`.
  
@@ -811,26 +862,54 @@ BOARD ||--o{ CURSOR_STATE : cursor
 | `BOARD` | `title` | GIN (tsvector) | ~20 токенов × 8 Б | 27 млн | **~4 ГБ** | Full-text поиск |
 | `BOARD` | `is_archived` | Partial B-Tree (false) | 8 байт | ~25 млн активных | **~500 МБ** | Фильтр активных досок |
 | `BOARD_MEMBER` | `user_id` | B-Tree | 16 байт | 135 млн | **~5 ГБ** | Доски пользователя |
-| `BOARD_OBJECT` | `board_id` | B-Tree | 16 байт | 2.7 млрд | **~108 ГБ** | Объекты доски — самый большой индекс |
+| `BOARD_OBJECT` | `(board_id, object_id)` | PRIMARY KEY (B-Tree) | 32 байта | 2.7 млрд | **~216 ГБ** | Объекты доски — самый большой индекс |
 | `BOARD_OBJECT` | `type` | B-Tree | 8 байт | 2.7 млрд | **~54 ГБ** | Фильтрация по типу |
 | `BOARD_OBJECT` | `geometry` | GIN (jsonb) | ~5 ключей × 8 Б | 2.7 млрд | **~270 ГБ** | Поиск в viewport — наиболее ёмкий |
 | `BOARD_OBJECT` | `is_deleted` | Partial B-Tree (false) | 8 байт | ~2.5 млрд | **~50 ГБ** | Мягкое удаление |
-| `COMMENT` | `board_id` | B-Tree | 16 байт | 270 млн | **~10 ГБ** | Комментарии доски |
+| `COMMENT` | `(board_id, comment_id)` | PRIMARY KEY (B-Tree) | 32 байтf | 270 млн | **~21 ГБ** | Комментарии доски |
 | `COMMENT` | `object_id` | B-Tree | 16 байт | 270 млн | **~10 ГБ** | Комментарии к объекту |
 | `COMMENT` | `parent_id` | B-Tree | 16 байт | 270 млн | **~10 ГБ** | Threading |
 | `COMMENT` | `status` | Partial B-Tree (open) | 8 байт | ~50 млн | **~1 ГБ** | Нерешённые комментарии |
 | `COMMENT` | `body` | GIN (tsvector) | ~10 токенов × 8 Б | 270 млн | **~21 ГБ** | Full-text поиск |
 | `EXPORT_JOB` | `status` | Partial B-Tree (pending) | 8 байт | ~100 тыс. | **< 10 МБ** | Воркер забирает задачи |
  
-**Итого по индексам:**
-- `USER` кластер: ~18 ГБ
-- `BOARD` кластер: ~5.5 ГБ
-- `BOARD_OBJECT` / `COMMENT` (Citus): **~534 ГБ** — основная нагрузка; необходимо учитывать при планировании RAM шардов (workset должен умещаться в shared_buffers)
+#### Суммарный объём индексов
+
+| Кластер      | Размер  |
+| ------------ | ------- |
+| USER         | ~18 ГБ  |
+| BOARD        | ~5 ГБ   |
+| BOARD_MEMBER | ~5 ГБ   |
+| BOARD_OBJECT | ~432 ГБ |
+| COMMENT      | ~51 ГБ  |
+**Итого индексов PostgreSQL ≈ ~511 ГБ**
+
  
-> Индексы `BOARD_OBJECT.geometry (GIN)` и `BOARD_OBJECT.board_id (B-Tree)` — критичны для производительности viewport-запросов и должны полностью помещаться в RAM (~380 ГБ суммарно). На каждый Citus-шард (340 шардов) приходится ~1.1 ГБ индексов — умещается в 8 ГБ shared_buffers одного шарда.
+> Индексы `BOARD_OBJECT.geometry (GIN)` и `BOARD_OBJECT.board_id (B-Tree)` — критичны для производительности viewport-запросов. 
+
+### 6.4 Размер таблиц
+
+Расчитаем размеры таблиц с учетом количества строк.
+
+| Таблица        | Кол-во строк | Размер строки | Размер  |
+| -------------- | ------------ | ------------- | ------- |
+| `USER`         | 100 млн      | 100 КБ        | ~10 ТБ  |
+| `BOARD`        | 27 млн       | 10 КБ         | ~270 ГБ |
+| `BOARD_MEMBER` | 135 млн      | 200 B         | ~27 ГБ  |
+| `BOARD_OBJECT` | 2.7 млрд     | 2 КБ          | ~5.4 ТБ |
+| `COMMENT`      | 270 млн      | 1 КБ          | ~270 ГБ |
+| `EXPORT_JOB`   | 3.5 млн      | 1 КБ          | ~3.5 ГБ |
+
+### Общий объём PostgreSQL
+
+```
+Данные таблиц ≈ 15.9 ТБ
+Индексы ≈ 0.5 ТБ
+Итого ≈ ~16.4 ТБ
+```
 
 
-### 6.4 Выбор СУБД, шардирование и резервирование
+### 6.5 Выбор СУБД, шардирование и резервирование
 
 #### ПОчему PostgreSQL?
 **Рассмотрим альтернативы для основных таблиц**
@@ -854,21 +933,21 @@ BOARD ||--o{ CURSOR_STATE : cursor
 |---|---|---|---|---|
 | `USER` | PostgreSQL (global) | **Не шардируется** — 100 млн строк × 100 Б ≈ 10 ТБ, один кластер справляется | 1 Master + 2 Slave (async) | Глобальные запросы (логин, профиль) — не привязаны к board_id; шардинг добавит cross-shard lookup |
 | `BOARD` | PostgreSQL (global) | **Не шардируется** — 27 млн строк × 10 КБ ≈ 270 ГБ, тривиально для одного кластера | 1 Master + 2 Slave | Метаданные досок нужны при поиске, инвайтах — cross-shard join по board_id усложнит |
-| `BOARD_MEMBER` | PostgreSQL/Citus | По `board_id` (co-located с `BOARD_OBJECT`) | На каждом шарде 1M + 2S | 135 млн строк; 85% запросов — «участники этой доски» |
+| `BOARD_MEMBER` | PostgreSQL/Citus | **Не шардируется** — 135 млн строк × 200 Б ≈ 27 ГБ, тривиально для одного кластера | 1M + 2S | 135 млн строк |
 | `BOARD_OBJECT` | PostgreSQL/Citus | По `board_id` — 340 шардов | 1M + 2S на шард | 2.7 млрд строк; viewport-запросы строго board-local |
 | `COMMENT` | PostgreSQL/Citus | По `board_id` (co-located) | 1M + 2S на шард | Всегда запрашиваются по доске |
-| `EXPORT_JOB` | PostgreSQL/Citus | По `board_id` (co-located) | 1M + 2S на шард | Задачи привязаны к доске |
-| `CRDT_OPERATION` | Cassandra | По `board_id` (partition key), `seq` (clustering key) | RF = 3, LOCAL_QUORUM | Append-only, миллиарды строк, write-optimized LSM |
-| `SESSION` | Redis | Не шардируется | 1M + 1S, Redis Sentinel | TTL 30 мин, глобальный lookup по токену |
-| `CURSOR_STATE` | Redis | Hash по `board_id` — Redis Hash `board:{id}:cursors` | 1M + 1S | Один ключ = все курсоры доски |
+| `EXPORT_JOB` | PostgreSQL/Citus | **Не шардируется** —  | 1M + 2S на шард | Задачи привязаны к доске |
+| `CRDT_OPERATION` | Cassandra | По `board_id` | RF = 3, LOCAL_QUORUM | Append-only, миллиарды строк, write-optimized LSM |
+| `SESSION` | Redis | **Не шардируется** | 1M + 1S, Redis Sentinel | TTL 30 мин, глобальный lookup по токену |
+| `CURSOR_STATE` | Redis | **Не шардируется** | 1M + 1S | Один ключ = все курсоры доски |
 
 Шардирование отдельно
 | Таблица                        | СУБД       | Шардирование                  | Обоснование |
 |--------------------------------|------------|-------------------------------|-------------|
 | `USER`                         | PostgreSQL | Не шардируется                | Редкие глобальные запросы, 100 млн строк — один кластер |
-| `BOARD` / `BOARD_MEMBER`       | PostgreSQL | Не шардируется                | Метаданные, список досок пользователя |
-| `BOARD_OBJECT` / `COMMENT` / `EXPORT_JOB` | PostgreSQL (Citus) | По `board_id`            | 85 % операций внутри одной доски |
-| `CRDT_OPERATION`               | Cassandra  | По `board_id`                 | Append-only, миллиарды строк |
+| `BOARD` / `BOARD_MEMBER` / `EXPORT_JOB`      | PostgreSQL | Не шардируется                | Метаданные, список досок пользователя |
+| `BOARD_OBJECT` / `COMMENT`  | PostgreSQL (Citus) | По `board_id`            |  |
+| `CRDT_OPERATION`               | Cassandra  | Не шардируется                 | Append-only|
 | `SESSION` / `CURSOR_STATE`     | Redis      | Не шардируется                 | Real-time |
 
 
