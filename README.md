@@ -1137,15 +1137,15 @@ graph TD
 | **HAProxy L4** | Резервирование физических компонентов | N+1 на каждый ДЦ: 1 active + 1 standby; Keepalived Virtual IP | При падении active-ноды Keepalived переключает VIP на standby за < 1 сек |
 | **Nginx L7** | Резервирование физических компонентов | N+1 (2–3 active + 1 standby); round-robin через HAProxy | Nginx без состояния — HAProxy исключает упавший инстанс из пула |
 | **WebSocket Service** | Резервирование ресурсов + логики | Kubernetes HPA ; sticky sessions по `board_id` | При падении клиенты переподключаются, получают delta sync от `last_seq`; |
-| **Board API Service** | Резервирование ресурсов | Kubernetes HPA; stateless — любой под обрабатывает любой запрос | HAProxy / Kubernetes Service исключает нездоровый под; retry 3× с экспоненциальным backoff |
+| **Board API Service** | Резервирование ресурсов | Kubernetes HPA; stateless — любой под обрабатывает любой запрос | HAProxy / Kubernetes Service исключает нездоровый под; |
 | **Export Service** | Резервирование ресурсов | Kubernetes Job-based; min 1 под; Kafka consumer group | При падении воркера Kafka перераспределяет партицию другому поду; at-least-once delivery |
-| **Auth Service** | Резервирование ресурсов | Kubernetes HPA (min 2 пода); stateless JWT-верификация | При недоступности Auth — Circuit Breaker возвращает 401; основной функционал досок не падает (graceful degradation) |
-| **PostgreSQL (global)** | Резервирование БД (репликация) | 1 Master + 2 Slave (async streaming replication); автофейловер через Patroni | При падении Master — Patroni выбирает новый Master из Slave за 15–30 сек; RPO < 1 мин (WAL) |
-| **PostgreSQL/Citus (шарды)** | Резервирование БД (репликация) | 1M + 2S на каждый из 340 шардов; Patroni на каждый шард | Падение шарда недоступно только для досок этого шарда; остальные работают (сегментирование) |
-| **Cassandra** | Резервирование БД (репликация) | RF=3, 3 Availability Zones (rack-aware); LOCAL_QUORUM | При падении 1 из 3 узлов LOCAL_QUORUM продолжает работу на 2 узлах; при падении 2 из 3 — запись временно недоступна, read с degraded consistency |
-| **Redis (SESSION)** | Резервирование БД (репликация) | 1 Master + 1 Slave; Redis Sentinel (автофейловер) | Sentinel обнаруживает падение Master за 5–10 сек, продвигает Slave; в окне failover — новые логины недоступны, активные сессии в браузере продолжают работу |
-| **Redis (CURSOR_STATE)** | Резервирование БД (репликация) | 1 Master + 1 Slave; Redis Cluster hash slots | TTL 500 мс — при потере данных курсора клиент пришлёт обновление через 50 мс; graceful degradation (курсоры временно не видны) |
-| **Kafka** | Резервирование физических компонентов | 3 брокера на ДЦ; replication factor = 3; ISR (In-Sync Replicas) | При падении 1 брокера сообщения доступны на 2 оставшихся; при падении 2 брокеров запись в топик невозможна — задачи экспорта накапливаются в retry-очереди |
+| **Auth Service** | Резервирование ресурсов | Kubernetes HPA (min 2 пода); stateless JWT-верификация | При недоступности Auth — Circuit Breaker возвращает 401; основной функционал досок не падает  |
+| **PostgreSQL (global)** | Резервирование БД (репликация) | 1 Master + 2 Slave (async streaming replication); автофейловер через Patroni | При падении выбирает новый Master из Slave за 15–30 сек |
+| **PostgreSQL/Citus (шарды)** | Резервирование БД (репликация) | 1M + 2S на каждый из 340 шардов; Patroni на каждый шард | Падение шарда недоступно только для досок этого шардаю остальные работают (сегментирование) |
+| **Cassandra** | Резервирование БД (репликация) | RF=3, 3 Availability Zones (rack-aware); LOCAL_QUORUM | --- |
+| **Redis (SESSION)** | Резервирование БД (репликация) | 1 Master + 1 Slave; Redis Sentinel (автофейловер) | --- |
+| **Redis (CURSOR_STATE)** | Резервирование БД (репликация) | 1 Master + 1 Slave; Redis Cluster hash slots | TTL 500 мс — при потере данных курсора клиент пришлёт обновление через мало мс; (курсоры временно стоят или не видны) |
+| **Kafka** | Резервирование физических компонентов | 3 брокера на ДЦ | При падении 1 брокера сообщения доступны на 2 оставшихся; при падении 2 брокеров запись в топик невозможна — задачи экспорта накапливаются в очереди |
 | **S3 / MinIO** | Резервирование ДЦ | Cross-region replication (CRR) в 3 региона; versioning enabled | При недоступности одного региона S3 — запросы перенаправляются в другой|
 | **CDN (CloudFront / Fastly)** | Резервирование ДЦ | Edge-узлы в 100+ точках присутствия; origin failover | При недоступности origin — CDN отдаёт закешированную версию |
 | **Prometheus + Grafana** | Резервирование логики (мониторинг) | 2 инстанса Prometheus (federated); Grafana — 2 реплики | При падении одного Prometheus — второй продолжает сбор метрик; алерты не теряются |
