@@ -1058,32 +1058,109 @@ PgBouncer принимает большое количество соедине�
 
 ```mermaid
 graph TB
-    U[Web/Mobile Client] --> DNS[GeoDNS]
-    DNS --> L4[L4 балансировщик региона]
-    L4 --> L7[NGINX L7]
- 
-    L7 --> WS[WebSocket Service]
-    L7 --> API[Board API]
-    L7 --> EXP[Export Service]
-    L7 --> AUTH[Auth Service]
- 
-    WS --> CASS[(Cassandra CRDT)]
-    API --> PG[(PostgreSQL boards)]
-    API --> PG_S[(PostgreSQL sharded objects)]
-    AUTH --> REDIS[(Redis sessions)]
-    WS --> REDIS
- 
-    API --> KAFKA[Kafka]
-    KAFKA --> W1[Worker: экспорт]
-    KAFKA --> W2[Worker: уведомления]
- 
-    W1 --> S3[(S3 Storage)]
-    U --> S3
- 
-    WS --> OBS[Prometheus + Grafana]
-    API --> OBS
-    EXP --> OBS
-    AUTH --> OBS
+    subgraph Clients["Клиенты"]
+        WEB[Web Client\nReact + WASM]
+        MOB[Mobile Client\nSSE / Long Polling]
+    end
+
+subgraph Entry["Точка входа"]
+        DNS[GeoDNS / BGP Anycast]
+        CDN[CDN — CloudFront/Fastly\nСтатика JS/CSS/изображения]
+    end
+subgraph LB["Балансировка"]
+        L4[HAProxy L4\nTCP, Sticky WS по board_id]
+        L7[NGINX L7\nTLS termination, HTTP→WS Upgrade]
+    end
+
+subgraph Services["Backend сервисы"]
+        WS["WebSocket Service (Go/Rust)\nStateful - CRDT broadcast\nboard_id → pod sticky"]
+        API["Board API (Go)\nStateless - REST CRUD\nBoards, Objects, Comments"]
+        AUTH[" Auth Service (Go)\nStateless - JWT verify / issue\nSSO, OAuth2"]
+        EXP["Export Service (Go)\nStateless - PNG/PDF render\nKafka consumer"]
+        AI["AI Service (Python)\nStateless - Smart suggestions\nAuto-layout, content gen"]
+        PUSH["Notification Service (Go)\nStateless - Email/Push/Slack\nKafka consumer"]
+        MEDIA["Media Service (Go)\nStateless - Upload handler\nPre-signed S3 URLs"]
+    end
+subgraph Storage["Хранилища"]
+        CASS[(Cassandra\nCRDT операции)]
+        PG[(PostgreSQL\nПользователи, Доски)]
+        REDIS_S[(Redis\nСессии AUTH)]
+        REDIS_C[(Redis\nCursor State)]
+    subgraph Async["Асинхронный слой — Kafka"]
+        direction LR
+        K_EXP[[export-jobs\nТопик экспорта]]
+        K_NOTIF[[notifications\nТопик уведомлений]]
+        K_AI[[ai-tasks\nТопик AI-задач]]
+        K_AUDIT[[audit-log\nТопик аудита]]
+    end
+end
+
+subgraph ObjectStorage["Объектное хранилище"]
+        S3[(S3 / MinIO\nМедиафайлы, экспорты\nCross-region replication)]
+    end
+
+subgraph Observability["Мониторинг — вынесен отдельно"]
+        PROM[Prometheus]
+        GRAF[Grafana]
+        LOKI[Loki]
+        PROM --> GRAF
+        PROM --> LOKI
+    end
+
+    %% Клиенты → Entry
+    WEB -->|sync| DNS
+    MOB -->|sync SSE/LongPoll| DNS
+    WEB -->|static| CDN
+    MOB -->|static| CDN
+
+    %% Entry → LB
+    DNS -->|sync| L4
+    L4 -->|sync| L7
+
+    %% L7 → Services (все синхронные)
+    L7 -->|sync WS Upgrade| WS
+    L7 -->|sync REST| API
+    L7 -->|sync REST| AUTH
+    L7 -->|sync REST| MEDIA
+
+    %% Auth → Services (gRPC sync)
+    AUTH -.->|sync gRPC verify| WS
+    AUTH -.->|sync gRPC verify| API
+
+    %% Services → Storage (sync)
+    WS -->|sync write CRDT delta| CASS
+    WS -->|sync read/write cursor| REDIS_C
+    WS -->|sync validate session| REDIS_S
+
+    API -->|sync read/write| PG
+    API -->|sync read/write| PG_S
+    AUTH -->|sync read/write session| REDIS_S
+
+    %% API → Kafka (async publish)
+    API -->|async publish| K_EXP
+    API -->|async publish| K_NOTIF
+    API -->|async publish| K_AI
+    API -->|async publish| K_AUDIT
+
+    %% Kafka → Workers (async consume)
+    K_EXP -->|async consume| EXP
+    K_NOTIF -->|async consume| PUSH
+    K_AI -->|async consume| AI
+
+    %% Workers → Storage
+    EXP -->|sync write| S3
+    AI -->|sync read board state| PG
+    MEDIA -->|sync pre-signed URL| S3
+
+    %% Mobile direct upload
+    MOB -->|sync pre-signed PUT| S3
+
+    %% Observability scrape (async)
+    WS -.->|async metrics| PROM
+    API -.->|async metrics| PROM
+    AUTH -.->|async metrics| PROM
+    EXP -.->|async metrics| PROM
+    AI -.->|async metrics| PROM
 ```
 ## 10. Обеспечение надёжности
 
@@ -1094,18 +1171,18 @@ graph TB
 | **GeoDNS / BGP Anycast** | Резервирование ДЦ | 7 дата-центров; при падении ДЦ BGP перестаёт анонсировать его IP — TTL 60 сек | Трафик автоматически переходит на следующий ближайший ДЦ |
 | **HAProxy L4** | Резервирование физических компонентов | N+1 на каждый ДЦ: 1 active + 1 standby; Keepalived Virtual IP | При падении active-ноды Keepalived переключает VIP на standby за < 1 сек |
 | **Nginx L7** | Резервирование физических компонентов | N+1 (2–3 active + 1 standby); round-robin через HAProxy | Nginx без состояния — HAProxy исключает упавший инстанс из пула |
-| **WebSocket Service** | Резервирование ресурсов + логики | Kubernetes HPA ; sticky sessions по `board_id` | При падении клиенты переподключаются, получают delta sync от `last_seq`; |
-| **Board API Service** | Резервирование ресурсов | Kubernetes HPA; stateless — любой под обрабатывает любой запрос | HAProxy / Kubernetes Service исключает нездоровый под; |
-| **Export Service** | Резервирование ресурсов | Kubernetes Job-based; min 1 под; Kafka consumer group | При падении воркера Kafka перераспределяет партицию другому поду; at-least-once delivery |
-| **Auth Service** | Резервирование ресурсов | Kubernetes HPA (min 2 пода); stateless JWT-верификация | При недоступности Auth — Circuit Breaker возвращает 401; основной функционал досок не падает (`graceful degradation`)  |
-| **PostgreSQL (global)** | Резервирование БД (репликация) | 1 Master + 2 Slave (async streaming replication); автофейловер через Patroni | При падении выбирает новый Master из Slave за 15–30 сек |
-| **PostgreSQL/Citus (шарды)** | Резервирование БД (репликация) | 1M + 2S на каждый из 340 шардов; Patroni на каждый шард | Падение шарда недоступно только для досок этого шардаю остальные работают (сегментирование) |
-| **Cassandra** | Резервирование БД (репликация) | RF=3, 3 Availability Zones (rack-aware); LOCAL_QUORUM | --- |
-| **Redis (SESSION)** | Резервирование БД (репликация) | 1 Master + 1 Slave; Redis Sentinel (автофейловер) | --- |
-| **Redis (CURSOR_STATE)** | Резервирование БД (репликация) | 1 Master + 1 Slave; Redis Cluster hash slots | TTL 500 мс — при потере данных курсора клиент пришлёт обновление через мало мс; (курсоры временно стоят или не видны) |
+| **WebSocket Service** | Резервирование ресурсов + логики | Kubernetes HPA ; sticky sessions по `board_id` | При падении клиенты переподключаются, получают delta sync от `last_seq`; **graceful degradation** |
+| **Board API Service** | Резервирование ресурсов | Kubernetes HPA; stateless — любой под обрабатывает любой запрос | HAProxy / Kubernetes Service исключает нездоровый под; **graceful degradation** |
+| **Export Service** | Резервирование ресурсов | Kubernetes Job-based; min 1 под; Kafka consumer group | При падении воркера Kafka перераспределяет партицию другому поду; at-least-once delivery **graceful degradation** |
+| **Auth Service** | Резервирование ресурсов | Kubernetes HPA (min 2 пода); stateless JWT-верификация | При недоступности Auth — Circuit Breaker возвращает 401; основной функционал досок не падает **graceful degradation**  |
+| **PostgreSQL (global)** | Резервирование БД (репликация) | 1 Master + 2 Slave (async streaming replication); автофейловер через Patroni | При падении выбирает новый Master из Slave за 15–30 сек **graceful degradation**  |
+| **PostgreSQL/Citus (шарды)** | Резервирование БД (репликация) | 1M + 2S на каждый из 340 шардов; Patroni на каждый шард | Падение шарда недоступно только для досок этого шардаю остальные работают (сегментирование) **graceful degradation** доски упавшего шарда переходят в read-only |
+| **Cassandra** | Резервирование БД (репликация) | RF=3, 3 Availability Zones (rack-aware); LOCAL_QUORUM | **graceful degradation** при потере доска переходит в snapshot read-only |
+| **Redis (SESSION)** | Резервирование БД (репликация) | 1 Master + 1 Slave; Redis Sentinel (автофейловер) | **graceful degradation** при полной недоступности Redis сессий Auth Service перезходит на stateless JWT-only режим |
+| **Redis (CURSOR_STATE)** | Резервирование БД (репликация) | 1 Master + 1 Slave; Redis Cluster hash slots | TTL 500 мс — при потере данных курсора клиент пришлёт обновление через мало мс; (курсоры временно стоят или не видны) **graceful degradation** - курсоры других пользователей временно не отображаются, редактирование доски продолжается |
 | **Kafka** | Резервирование физических компонентов | 3 брокера на ДЦ | При падении 1 брокера сообщения доступны на 2 оставшихся; при падении 2 брокеров запись в топик невозможна — задачи экспорта накапливаются в очереди |
 | **S3 / MinIO** | Резервирование ДЦ | Cross-region replication (CRR) в 3 региона; versioning enabled | При недоступности одного региона S3 — запросы перенаправляются в другой|
-| **CDN (CloudFront / Fastly)** | Резервирование ДЦ | Edge-узлы в 100+ точках присутствия; origin failover | При недоступности origin — CDN отдаёт закешированную версию |
+| **CDN (CloudFront / Fastly)** | Резервирование ДЦ | Edge-узлы в 100+ точках присутствия; origin failover | **graceful degradation** При недоступности origin — CDN отдаёт закешированную версию  |
 | **Prometheus + Grafana** | Резервирование логики (мониторинг) | 2 инстанса Prometheus (federated); Grafana — 2 реплики | При падении одного Prometheus — второй продолжает сбор метрик; алерты не теряются |
 | **Kubernetes (EKS control plane)** | Резервирование физических компонентов | Managed control plane (AWS EKS) — 3 availability zones | min 3 ноды на ДЦ |
 
@@ -1127,7 +1204,25 @@ graph TB
 
 
 ### 10.3 Асинхронные паттерны для надёжности
- 
+
+Два ключевых асинхронных паттерна — **Transactional Outbox** и **Event-Driven Architecture** через Kafka — непосредственно влияют на схему взаимодействия сервисов .
+
+#### Паттерн 1: Transactional Outbox
+**Проблема:** При одновременной записи в PostgreSQL и публикации события в Kafka возможна ситуация, когда база обновилась, а событие в Kafka не попало (или наоборот). Это нарушает согласованность данных между сервисами.
+
+**Решение:** Board API при любом изменении состояния (создание/редактирование объекта, новый комментарий) атомарно в одной PostgreSQL-транзакции:
+1. Записывает изменение в целевую таблицу
+2. Записывает событие в таблицу `outbox_events`
+
+Отдельный **Outbox Worker** (Debezium CDC или polling) читает новые записи из `outbox_events` и публикует их в соответствующий Kafka-топик. После подтверждения Kafka запись в `outbox_events` помечается как обработанная.
+
+#### Паттерн 2: Event-Driven Architecture (Saga через Kafka)
+**Проблема:** Сложные многошаговые операции (например, экспорт доски: сохранить задачу -> отрендерить -> загрузить в S3 -> уведомить пользователя) нельзя завернуть в одну транзакцию - шаги выполняются разными сервисами асинхронно.
+
+**Решение:** Каждый шаг публикует событие о своём завершении в Kafka. Следующий сервис-consumer реагирует на это событие и выполняет свой шаг. При сбое на любом шаге Kafka гарантирует повторную доставку (at-least-once), а idempotency key предотвращает дублирование.
+
+**Влияние на схему:** Board API не вызывает Export Service напрямую (нет синхронного gRPC/REST между ними). Вместо этого Board API публикует в `export-jobs`, Export Service его потребляет, по завершении публикует в `notifications`, Notification Service уведомляет пользователя. Сервисы полностью развязаны - можно масштабировать, деплоить и перезапускать каждый независимо.
+
 #### Event-driven архитектура
 Клиент отправляет запрос в API, который сразу возвращает ответ, а тяжёлые операции (экспорт, уведомления, денормализация) обрабатываются асинхронно через Kafka. Если worker упал, Kafka автоматически перераспределяет задачи другому воркеру.
  
@@ -1159,6 +1254,102 @@ graph TB
 5. После завершения всех активных соединений под останавливается
 6. Kubernetes поднимает новый под с обновлённым кодом
  
+## 11. Выбор оборудования и хостинга
+### 11.1 Методология расчета
+Расчет оборудования ведется на основе пиковой нагрузки (см. раздел 2) и количество серверов баланировки (см. раздел 4). Для каждого сервися определяется удобное потребление CPU/RAM на единицу нагрузки, затем умножаем на пиковый RPS/количество соединений.
+
+**Базовые параметры нагрузки (пик):**
+- Пиковый RPS всего: ~125 280 (WebSocket события + REST)
+- WebSocket соединений одновременно: 200 000
+- Из них WebSocket-событий/сек: ~111 100 RPS
+
+**Модель развёртывания:** Гибридная. Stateless сервисы — в Kubernetes . Stateful (Cassandra, PostgreSQL, Kafka, Redis) — на выделенных bare-metal серверах. CDN и объектное хранилище — облачные managed (Cloudflare R2 + CloudFront). Prometheus/Grafana — на отдельных VM. 
+
+### 11.2 Расчет ресурсов по сервисам
+
+| Сервис | Тип нагрузки | Пиковая нагрузка | CPU на единицу | Итого CPU cores | RAM | Кол-во подов |
+|---|---|---|---|---|---|---|
+| **WebSocket Service** (Go) | 200 000 WS connections + 111 100 events/s | stateful, ~10 000 conn/pod | ~0.5 core / 10 000 conn | **10 cores** | ~4 GB / pod (4 KB × 10 000 conn) | 20 |
+| **Board API** (Go, лёгкий JSON API) | ~14 000 RPS REST | 5 000 RPS/core (Go JSON) | ~3 cores | **3 cores** (×2 резерв = 6) | 2 GB / pod | 6 |
+| **Auth Service** (Go, stateless JWT) | ~3 000 RPS (10% от API) | 5 000 RPS/core | 1 core | **2 cores** (min 2 пода) | 1 GB / pod | 4 |
+| **Export Service** (Go, рендер PDF/PNG) | 23 RPS ср. / 280 RPS пик | CPU-intensive рендер | 1 core / 3 RPS | **10 cores** | 4 GB / pod | 10 |
+| **AI Service** (Python, inference) | async, ~5–10 задач/сек | GPU или CPU-intensive | GPU или 4 cores/задачу | **40 cores** (или 2 GPU) | 16 GB / pod | 10 |
+| **Notification Service** (Go) | async, ~1 000 events/s | 1 000 events/core | 1 core | **2 cores** | 512 MB / pod | 4 |
+| **Media Service** (Go) | 93 RPS uploads ср. | S3 bound, мало CPU | 0.5 core/pod | **2 cores** | 1 GB / pod | 4 |
+| **Nginx L7** | 200 000 WS + 14 180 RPS HTTP | 35 000 WS/server | — | 16 серверов (раздел 4) | 200 MB/server | выделенные |
+| **HAProxy L4** | 400 000 TCP conn | 700 000 conn/server | — | 14 серверов (раздел 4) | 1 GB/server | выделенные |
+
+**Итого для Kubernetes-подов:** ~75 CPU cores, ~120 GB RAM
+
+### 11.3 Расчет серверов для stateful компонентов
+
+| Компонент | Нагрузка | Конфигурация 1 сервера | Кол-во серверов | Обоснование |
+|---|---|---|---|---|
+| **Cassandra** | ~111 100 write RPS (CRDT) | 32 vCPU / 256 GB RAM / 4×NVMe 4TB / 25 Gb/s | 21 (7 ДЦ × 3 узла) | RF=3, 3 AZ на ДЦ; 1 узел держит ~40 000 RPS write на NVMe |
+| **PostgreSQL master (global)** | ~1 000 RPS write, ~5 000 RPS read | 32 vCPU / 128 GB RAM / 2×NVMe 2TB / 10 Gb/s | 3 (1M + 2S на ДЦ) | Master + 2 replica (Patroni); streaming replication |
+| **PostgreSQL/Citus шарды** | 340 шардов, ~9 000 RPS | 32 vCPU / 128 GB RAM / 2×NVMe 4TB / 10 Gb/s | 51 (340 шардов / 20 шардов на сервер × 3 ноды / 3 = 17 физических серверов × 3 = 51) | 1M+2S на шард; несколько шардов на сервер |
+| **Redis (sessions)** | 200 000 сессий, ~3 GB | 16 vCPU / 32 GB RAM / SSD 200 GB / 10 Gb/s | 4 (2 ДЦ × 2: M+S) | Sentinel failover |
+| **Redis (cursors)** | 200 000 cursor state, TTL 500 ms | 16 vCPU / 16 GB RAM / SSD 100 GB / 10 Gb/s | 6 (3 кластера × 2: M+S) | TTL-данные, малый размер |
+| **Kafka** | ~111 100 events/s + export/notif | 16 vCPU / 64 GB RAM / 2×NVMe 2TB / 25 Gb/s | 21 (7 ДЦ × 3 брокера) | RF=3; 3 брокера на ДЦ |
+| **Kubernetes worker nodes** | 75 CPU cores, 120 GB RAM суммарно | 32 vCPU / 256 GB RAM / 2×NVMe 1TB / 25 Gb/s | 10 (7 ДЦ, минимум 1–2 ноды/ДЦ) | 32 cores × 10 = 320 cores (overcommit 4×); HPA auto-scale |
+
+### 11.5 Выбор хостинг-провайдеров
+
+#### Основной провайдер: Hetzner (bare-metal)
+
+**Обоснование выбора:** Hetzner предоставляет наиболее дешёвые в Европе выделенные серверы с бесплатным трафиком. Hetzner имеет ДЦ в Нюрнберге, Фалькенштейне и Хельсинки — покрывает Европу и Россию (DC-3 Frankfurt + DC-4 Warsaw).
+
+Для регионов без ДЦ Hetzner (Ashburn, Oregon, Singapore, Tokyo, São Paulo) используется **OVHcloud** — аналогичный дешёвый bare-metal провайдер.
+
+| Регион | ДЦ | Провайдер | Обоснование |
+|---|---|---|---|
+| США Восток (20%) | DC-1 Ashburn | OVHcloud US | Дешёвый bare-metal, наличие в Ashburn VA |
+| США Запад (15%) | DC-2 Oregon | OVHcloud US | ДЦ в Hillsboro OR |
+| Зап. Европа (20%) | DC-3 Frankfurt | Hetzner | Основной ДЦ, самый дешёвый |
+| Вост. Европа (12%) | DC-4 Warsaw | Hetzner Helsinki | Ближайший к Восточной Европе |
+| ЮВА (15%) | DC-5 Singapore | OVHcloud SG | ДЦ в Сингапуре |
+| Япония (10%) | DC-6 Tokyo | OVHcloud JP | ДЦ в Токио |
+| Лат. Америка (8%) | DC-7 São Paulo | OVHcloud BRA | ДЦ в Бразилии |
+
+#### Managed облачные сервисы (дополнительно)
+
+| Сервис | Провайдер | Обоснование | Стоимость/мес |
+|---|---|---|---|
+| **CDN** | Cloudflare Pro/Business | 100+ PoP по всему миру, бесплатный трафик, DDoS-защита | ~$200 |
+| **Object Storage (S3)** | Cloudflare R2 | Нет платы за egress трафик (в отличие от AWS S3), S3-совместимый API | ~$1 500 (500 ТБ × $0.015 + operations) |
+| **GeoDNS** | Cloudflare DNS | Бесплатный Anycast DNS с Geo-routing, минимальные TTL | $0 (Free plan) |
+| **APNs/FCM** | Apple / Google | Push-уведомления для мобильных | $0 (встроено в платформы) |
+| **Email (уведомления)** | Amazon SES | $0.10 / 1 000 писем, надёжная доставляемость | ~$100 |
+
+### 11.6 Итоговый расчёт месячной стоимости
+
+| Статья расходов | Провайдер | Стоимость/мес |
+|---|---|---|
+| Kubernetes workers (10 серверов) | Hetzner | $4 200 |
+| Cassandra nodes (21 сервер) | Hetzner / OVHcloud | $12 390 |
+| PostgreSQL global (3 сервера) | Hetzner | $1 020 |
+| PostgreSQL shards (17 серверов) | Hetzner / OVHcloud | $7 140 |
+| Redis nodes (10 серверов) | Hetzner | $1 400 |
+| Kafka brokers (21 сервер) | Hetzner / OVHcloud | $7 560 |
+| NGINX L7 (16 серверов) | Hetzner / OVHcloud | $3 680 |
+| HAProxy L4 (14 серверов) | Hetzner / OVHcloud | $1 680 |
+| Monitoring VPS (3) | Hetzner | $150 |
+| CDN | Cloudflare | $200 |
+| Object Storage (R2) | Cloudflare R2 | $1 500 |
+| Email (SES) | Amazon SES | $100 |
+| **Итого** | | **~$41 020/мес** |
+
+### 11.7 Kubernetes: конфигурация подов
+
+| Сервис | CPU request | CPU limit | RAM request | RAM limit | Реплик (мин/макс) |
+|---|---|---|---|---|---|
+| WebSocket Service | 2 | 4 | 4 GB | 8 GB | 20 / 60 |
+| Board API | 1 | 2 | 512 MB | 2 GB | 6 / 30 |
+| Auth Service | 0.5 | 1 | 256 MB | 1 GB | 4 / 20 |
+| Export Service | 2 | 4 | 2 GB | 8 GB | 10 / 40 |
+| AI Service | 4 | 8 | 8 GB | 16 GB | 10 / 20 |
+| Notification Service | 0.5 | 1 | 256 MB | 512 MB | 4 / 20 |
+| Media Service | 0.5 | 1 | 512 MB | 1 GB | 4 / 16 |
 
 
 ## Использованные источники
