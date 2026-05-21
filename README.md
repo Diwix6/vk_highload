@@ -1057,6 +1057,8 @@ PgBouncer принимает большое количество соедине�
 ### 9.1 Диаграмма взаимодействия сервисов
 
 <img width="1232" height="811" alt="изображение" src="https://github.com/user-attachments/assets/8304c93a-c3e2-4f6f-b1ee-7163110fb573" />
+<img width="1021" height="552" alt="изображение" src="https://github.com/user-attachments/assets/797be2fc-dc9d-4b00-a4c7-849155083a69" />
+
 
 
 ## 10. Обеспечение надёжности
